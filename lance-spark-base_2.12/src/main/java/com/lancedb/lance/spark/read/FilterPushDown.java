@@ -181,7 +181,8 @@ public class FilterPushDown {
       return "'" + value + "'";
     } else if (value instanceof BigDecimal) {
       BigDecimal decimal = (BigDecimal) value;
-      return String.format("CAST (%s AS DECIMAL(%d, %d))", value, decimal.precision(), decimal.scale());
+      return String.format(
+          "CAST (%s AS DECIMAL(%d, %d))", value, decimal.precision(), decimal.scale());
     } else if (value instanceof Object[]) {
       Object[] array = (Object[]) value;
       StringBuilder sb = new StringBuilder();

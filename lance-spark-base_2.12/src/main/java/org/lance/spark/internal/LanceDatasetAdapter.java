@@ -239,6 +239,14 @@ public class LanceDatasetAdapter {
     }
   }
 
+  public static RemovalStats cleanup(LanceConfig config, CleanupPolicy policy) {
+    String uri = config.getDatasetUri();
+    ReadOptions options = SparkOptions.genReadOptionFromConfig(config);
+    try (Dataset dataset = Dataset.open(allocator, uri, options)) {
+      return dataset.cleanupWithPolicy(policy);
+    }
+  }
+
   public static void createDataset(String datasetUri, StructType sparkSchema, WriteParams params) {
     Dataset.create(
             allocator,

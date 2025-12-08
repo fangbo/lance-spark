@@ -21,6 +21,7 @@ singleStatement
 statement
     : ALTER TABLE multipartIdentifier ADD COLUMNS columnList FROM identifier                         #addColumnsBackfill
     | OPTIMIZE multipartIdentifier COMPACT (WITH '(' (namedArgument (',' namedArgument)*)? ')')?     #compact
+    | OPTIMIZE multipartIdentifier CLEANUP (WITH '(' (namedArgument (',' namedArgument)*)? ')')?     #cleanup
     ;
 
 multipartIdentifier
@@ -64,6 +65,7 @@ ADD: 'ADD';
 ALTER: 'ALTER';
 COLUMNS: 'COLUMNS';
 COMPACT: 'COMPACT';
+CLEANUP: 'CLEANUP';
 FROM: 'FROM';
 OPTIMIZE: 'OPTIMIZE';
 TABLE: 'TABLE';

@@ -30,6 +30,9 @@ case class LanceDataSourceV2Strategy(session: SparkSession) extends SparkStrateg
     case Compact(ResolvedIdentifier(catalog, ident), args) =>
       CompactExec(asTableCatalog(catalog), ident, args) :: Nil
 
+    case Cleanup(ResolvedIdentifier(catalog, ident), args) =>
+      CleanupExec(asTableCatalog(catalog), ident, args) :: Nil
+
     case _ => Nil
   }
 

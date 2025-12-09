@@ -19,6 +19,8 @@ import org.lance.FragmentMetadata;
 import org.lance.FragmentOperation;
 import org.lance.ReadOptions;
 import org.lance.WriteParams;
+import org.lance.cleanup.CleanupPolicy;
+import org.lance.cleanup.RemovalStats;
 import org.lance.compaction.Compaction;
 import org.lance.compaction.CompactionMetrics;
 import org.lance.compaction.CompactionOptions;

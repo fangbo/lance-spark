@@ -13,12 +13,15 @@
  */
 package org.lance.spark.read;
 
+import org.lance.Dataset;
 import org.lance.ipc.ColumnOrdering;
 import org.lance.spark.LanceConfig;
 import org.lance.spark.SparkOptions;
 import org.lance.spark.internal.LanceDatasetAdapter;
 import org.lance.spark.utils.Optional;
 
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.NullOrdering;
 import org.apache.spark.sql.connector.expressions.SortDirection;
@@ -35,6 +38,7 @@ import org.apache.spark.sql.connector.read.SupportsPushDownRequiredColumns;
 import org.apache.spark.sql.connector.read.SupportsPushDownTopN;
 import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.types.ArrayType;
+import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 
@@ -56,14 +60,44 @@ public class LanceScanBuilder
   private Optional<Integer> offset = Optional.empty();
   private Optional<List<ColumnOrdering>> topNSortOrders = Optional.empty();
   private Optional<Aggregation> pushedAggregation = Optional.empty();
+  private LanceLocalScan localScan = null;
+
+  // Lazily opened dataset for reuse during scan building
+  private Dataset lazyDataset = null;
 
   public LanceScanBuilder(StructType schema, LanceConfig config) {
     this.schema = schema;
     this.config = config;
   }
 
+  /**
+   * Gets or opens a dataset for reuse during scan building. The dataset is lazily opened on first
+   * access and reused for subsequent calls.
+   */
+  private Dataset getOrOpenDataset() {
+    if (lazyDataset == null) {
+      lazyDataset = LanceDatasetAdapter.openDataset(config);
+    }
+    return lazyDataset;
+  }
+
+  /** Closes the lazily opened dataset if it was opened. */
+  private void closeLazyDataset() {
+    if (lazyDataset != null) {
+      lazyDataset.close();
+      lazyDataset = null;
+    }
+  }
+
   @Override
   public Scan build() {
+    // Close the lazily opened dataset - it's no longer needed after build
+    closeLazyDataset();
+
+    // Return LocalScan if we have a metadata-only aggregation result
+    if (localScan != null) {
+      return localScan;
+    }
     Optional<String> whereCondition = FilterPushDown.compileFiltersToSqlWhereClause(pushedFilters);
     return new LanceScan(
         schema, config, whereCondition, limit, offset, topNSortOrders, pushedAggregation);
@@ -115,7 +149,7 @@ public class LanceScanBuilder
   @Override
   public boolean pushOffset(int offset) {
     // Only one data file can be pushed down the offset.
-    if (LanceDatasetAdapter.getFragmentIds(config).size() == 1) {
+    if (LanceDatasetAdapter.getFragmentIds(getOrOpenDataset()).size() == 1) {
       this.offset = Optional.of(offset);
       return true;
     } else {
@@ -159,6 +193,19 @@ public class LanceScanBuilder
       return false;
     }
     if (funcs.length == 1 && funcs[0] instanceof CountStar) {
+      // Check if we can use metadata-based count (no filters pushed)
+      if (pushedFilters.length == 0) {
+        Optional<Long> metadataCount = LanceDatasetAdapter.getCountFromMetadata(getOrOpenDataset());
+        if (metadataCount.isPresent()) {
+          // Create LocalScan with pre-computed count result
+          StructType countSchema = new StructType().add("count", DataTypes.LongType);
+          InternalRow[] rows = new InternalRow[1];
+          rows[0] = new GenericInternalRow(new Object[] {metadataCount.get()});
+          this.localScan = new LanceLocalScan(countSchema, rows, config.getDatasetUri());
+          return true;
+        }
+      }
+      // Fall back to scan-based count (with filters or metadata unavailable)
       this.pushedAggregation = Optional.of(aggregation);
       return true;
     }

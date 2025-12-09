@@ -17,6 +17,7 @@ import org.lance.Dataset;
 import org.lance.Fragment;
 import org.lance.FragmentMetadata;
 import org.lance.FragmentOperation;
+import org.lance.ManifestSummary;
 import org.lance.ReadOptions;
 import org.lance.WriteParams;
 import org.lance.compaction.Compaction;
@@ -49,6 +50,18 @@ import java.util.stream.Collectors;
 
 public class LanceDatasetAdapter {
   public static final BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE);
+
+  /**
+   * Opens a Lance dataset. Caller is responsible for closing the dataset.
+   *
+   * @param config the Lance configuration
+   * @return the opened Dataset
+   */
+  public static Dataset openDataset(LanceConfig config) {
+    String uri = config.getDatasetUri();
+    ReadOptions options = SparkOptions.genReadOptionFromConfig(config);
+    return Dataset.open(allocator, uri, options);
+  }
 
   public static Optional<StructType> getSchema(LanceConfig config) {
     String uri = config.getDatasetUri();
@@ -96,8 +109,18 @@ public class LanceDatasetAdapter {
     String uri = config.getDatasetUri();
     ReadOptions options = SparkOptions.genReadOptionFromConfig(config);
     try (Dataset dataset = Dataset.open(allocator, uri, options)) {
-      return dataset.getFragments().stream().map(Fragment::getId).collect(Collectors.toList());
+      return getFragmentIds(dataset);
     }
+  }
+
+  /**
+   * Get fragment IDs from an already-opened dataset.
+   *
+   * @param dataset the opened Dataset
+   * @return list of fragment IDs
+   */
+  public static List<Integer> getFragmentIds(Dataset dataset) {
+    return dataset.getFragments().stream().map(Fragment::getId).collect(Collectors.toList());
   }
 
   public static List<FragmentMetadata> getFragments(LanceConfig config) {
@@ -105,6 +128,23 @@ public class LanceDatasetAdapter {
     ReadOptions options = SparkOptions.genReadOptionFromConfig(config);
     try (Dataset dataset = Dataset.open(allocator, uri, options)) {
       return dataset.getFragments().stream().map(Fragment::metadata).collect(Collectors.toList());
+    }
+  }
+
+  /**
+   * Get the row count from manifest summary metadata using an already-opened dataset. This is O(1)
+   * using ManifestSummary.getTotalRows().
+   *
+   * @param dataset the opened Dataset
+   * @return Optional containing the count if metadata is available, empty otherwise
+   */
+  public static Optional<Long> getCountFromMetadata(Dataset dataset) {
+    try {
+      ManifestSummary summary = dataset.getVersion().getManifestSummary();
+      return Optional.of(summary.getTotalRows());
+    } catch (Exception e) {
+      // metadata not available
+      return Optional.empty();
     }
   }
 

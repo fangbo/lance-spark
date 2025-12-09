@@ -43,11 +43,9 @@ public abstract class BaseCleanupTest {
             .appName("lance-cleanup-test")
             .master("local[4]")
             .config(
-                "spark.sql.catalog." + catalogName,
-                "org.lance.spark.LanceNamespaceSparkCatalog")
+                "spark.sql.catalog." + catalogName, "org.lance.spark.LanceNamespaceSparkCatalog")
             .config(
-                "spark.sql.extensions",
-                "org.lance.spark.extensions.LanceSparkSessionExtensions")
+                "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
             .config("spark.sql.catalog." + catalogName + ".impl", "dir")
             .config("spark.sql.catalog." + catalogName + ".root", tempDir.toString())
             .getOrCreate();

@@ -13,14 +13,13 @@
  */
 package org.apache.spark.sql.execution.datasources.v2
 
-import com.lancedb.lance.cleanup.CleanupPolicy
-import com.lancedb.lance.spark.LanceDataset
-import com.lancedb.lance.spark.internal.LanceDatasetAdapter
-
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
 import org.apache.spark.sql.catalyst.plans.logical.{CleanupOutputType, NamedArgument}
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
+import org.lance.cleanup.CleanupPolicy
+import org.lance.spark.LanceDataset
+import org.lance.spark.internal.LanceDatasetAdapter
 
 import scala.jdk.CollectionConverters._
 

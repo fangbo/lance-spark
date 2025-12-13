@@ -31,7 +31,7 @@ import org.apache.spark.sql.types._
 import org.json4s.{DefaultFormats, Formats}
 import org.json4s.JsonAST.{JObject, JString}
 import org.lance.spark.LanceConstant
-import org.lance.spark.utils.{BlobUtils, VectorUtils}
+import org.lance.spark.utils.{BlobUtils, LargeVarCharUtils, VectorUtils}
 
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,6 +41,7 @@ import scala.collection.JavaConverters._
 object LanceArrowUtils {
   val ARROW_FIXED_SIZE_LIST_SIZE_KEY = VectorUtils.ARROW_FIXED_SIZE_LIST_SIZE_KEY
   val ENCODING_BLOB = BlobUtils.LANCE_ENCODING_BLOB_KEY
+  val ARROW_LARGE_VAR_CHAR_KEY = LargeVarCharUtils.ARROW_LARGE_VAR_CHAR_KEY
 
   def fromArrowField(field: Field): DataType = {
     field.getType match {
@@ -84,6 +85,12 @@ object LanceArrowUtils {
         // Lance returns LargeBinary in schema but Struct in data for blob columns
         // We need to handle this as binary to match the schema
         BinaryType
+      case _: ArrowType.LargeUtf8 =>
+        // LargeUtf8 maps back to StringType in Spark
+        StringType
+      case _: ArrowType.LargeBinary =>
+        // LargeBinary maps back to BinaryType in Spark
+        BinaryType
       case l: ArrowType.List =>
         val children = field.getChildren
         if (children.isEmpty) {
@@ -100,11 +107,16 @@ object LanceArrowUtils {
   def fromArrowSchema(schema: Schema): StructType = {
     StructType(schema.getFields.asScala.map { field =>
       val dt = fromArrowField(field)
-      // If the Arrow field was a FixedSizeList, add metadata to preserve the size information
+      // Preserve type information in metadata for types that need special handling on write
       val metadata = field.getType match {
         case fixedSizeList: ArrowType.FixedSizeList =>
           new MetadataBuilder()
             .putLong(ARROW_FIXED_SIZE_LIST_SIZE_KEY, fixedSizeList.getListSize)
+            .build()
+        case _: ArrowType.LargeUtf8 =>
+          // Preserve LargeUtf8 type info so subsequent writes use LargeVarCharVector
+          new MetadataBuilder()
+            .putString(ARROW_LARGE_VAR_CHAR_KEY, "true")
             .build()
         case _ => Metadata.fromJObject(
             JObject(field.getMetadata.asScala.map { case (k, v) => (k, JString(v)) }.toList))
@@ -142,6 +154,10 @@ object LanceArrowUtils {
     if (metadata != null) {
       if (metadata.contains(ENCODING_BLOB)
         && metadata.getString(ENCODING_BLOB).equalsIgnoreCase("true")) {
+        large = true
+      }
+      if (metadata.contains(ARROW_LARGE_VAR_CHAR_KEY)
+        && metadata.getString(ARROW_LARGE_VAR_CHAR_KEY).equalsIgnoreCase("true")) {
         large = true
       }
 

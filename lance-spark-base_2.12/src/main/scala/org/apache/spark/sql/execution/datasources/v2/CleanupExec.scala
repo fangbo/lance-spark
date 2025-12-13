@@ -1,0 +1,62 @@
+/*
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.spark.sql.execution.datasources.v2
+
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
+import org.apache.spark.sql.catalyst.plans.logical.{CleanupOutputType, NamedArgument}
+import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
+import org.lance.cleanup.CleanupPolicy
+import org.lance.spark.LanceDataset
+import org.lance.spark.internal.LanceDatasetAdapter
+
+import scala.jdk.CollectionConverters._
+
+case class CleanupExec(
+    catalog: TableCatalog,
+    ident: Identifier,
+    args: Seq[NamedArgument]) extends LeafV2CommandExec {
+
+  override def output: Seq[Attribute] = CleanupOutputType.SCHEMA
+
+  private def buildPolicy(): CleanupPolicy = {
+    val builder = CleanupPolicy.builder()
+    val argsMap = args.map(t => (t.name, t)).toMap
+
+    argsMap.get("before_version").map(t => builder.withBeforeVersion(t.value.asInstanceOf[Long]))
+    argsMap
+      .get("before_timestamp_millis")
+      .map(t => builder.withBeforeTimestampMillis(t.value.asInstanceOf[Long]))
+    argsMap.get("delete_unverified").map(t =>
+      builder.withDeleteUnverified(t.value.asInstanceOf[Boolean]))
+    argsMap
+      .get("error_if_tagged_old_versions")
+      .map(t => builder.withErrorIfTaggedOldVersions(t.value.asInstanceOf[Boolean]))
+
+    builder.build()
+  }
+
+  override protected def run(): Seq[InternalRow] = {
+    val lanceDataset = catalog.loadTable(ident) match {
+      case lanceDataset: LanceDataset => lanceDataset
+      case _ =>
+        throw new UnsupportedOperationException("Cleanup only supports for LanceDataset")
+    }
+
+    val policy = buildPolicy()
+    val stats = LanceDatasetAdapter.cleanup(lanceDataset.config(), policy)
+
+    Seq(new GenericInternalRow(Array[Any](stats.getBytesRemoved, stats.getOldVersions)))
+  }
+}

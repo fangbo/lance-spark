@@ -20,6 +20,8 @@ import org.lance.FragmentOperation;
 import org.lance.ManifestSummary;
 import org.lance.ReadOptions;
 import org.lance.WriteParams;
+import org.lance.cleanup.CleanupPolicy;
+import org.lance.cleanup.RemovalStats;
 import org.lance.compaction.Compaction;
 import org.lance.compaction.CompactionMetrics;
 import org.lance.compaction.CompactionOptions;
@@ -291,6 +293,14 @@ public class LanceDatasetAdapter {
     ReadOptions options = SparkOptions.genReadOptionFromConfig(config);
     try (Dataset dataset = Dataset.open(allocator, uri, options)) {
       return Compaction.commitCompaction(dataset, results, compactOptions);
+    }
+  }
+
+  public static RemovalStats cleanup(LanceConfig config, CleanupPolicy policy) {
+    String uri = config.getDatasetUri();
+    ReadOptions options = SparkOptions.genReadOptionFromConfig(config);
+    try (Dataset dataset = Dataset.open(allocator, uri, options)) {
+      return dataset.cleanupWithPolicy(policy);
     }
   }
 

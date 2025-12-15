@@ -33,6 +33,15 @@ case class LanceDataSourceV2Strategy(session: SparkSession) extends SparkStrateg
     case Vacuum(ResolvedIdentifier(catalog, ident), args) =>
       VacuumExec(asTableCatalog(catalog), ident, args) :: Nil
 
+    case AddIndex(ResolvedIdentifier(catalog, ident), indexName, method, columns, args) =>
+      AddIndexExec(
+        asTableCatalog(catalog),
+        ident,
+        indexName,
+        method,
+        columns,
+        args) :: Nil
+
     case _ => Nil
   }
 

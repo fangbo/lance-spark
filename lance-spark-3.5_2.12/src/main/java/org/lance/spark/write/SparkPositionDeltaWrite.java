@@ -120,17 +120,28 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
 
     @Override
     public DeltaWriter<InternalRow> createWriter(int partitionId, long taskId) {
-      int batch_size = SparkOptions.getBatchSize(config);
-      LanceArrowWriter arrowWriter = LanceDatasetAdapter.getArrowWriter(sparkSchema, batch_size);
+      int batchSize = SparkOptions.getBatchSize(config);
+      boolean useQueuedBuffer = SparkOptions.useQueuedWriteBuffer(config);
       WriteParams params = SparkOptions.genWriteParamsFromConfig(config);
+
+      // Select buffer type based on configuration
+      ArrowBatchWriteBuffer writeBuffer;
+      if (useQueuedBuffer) {
+        int queueDepth = SparkOptions.getQueueDepth(config);
+        writeBuffer =
+            LanceDatasetAdapter.getQueuedArrowBatchWriteBuffer(sparkSchema, batchSize, queueDepth);
+      } else {
+        writeBuffer = LanceDatasetAdapter.getSemaphoreArrowBatchWriteBuffer(sparkSchema, batchSize);
+      }
+
       Callable<List<FragmentMetadata>> fragmentCreator =
-          () -> LanceDatasetAdapter.createFragment(config.getDatasetUri(), arrowWriter, params);
+          () -> LanceDatasetAdapter.createFragment(config.getDatasetUri(), writeBuffer, params);
       FutureTask<List<FragmentMetadata>> fragmentCreationTask = new FutureTask<>(fragmentCreator);
       Thread fragmentCreationThread = new Thread(fragmentCreationTask);
       fragmentCreationThread.start();
 
       return new LanceDeltaWriter(
-          config, new LanceDataWriter(arrowWriter, fragmentCreationTask, fragmentCreationThread));
+          config, new LanceDataWriter(writeBuffer, fragmentCreationTask, fragmentCreationThread));
     }
   }
 

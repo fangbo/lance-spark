@@ -18,6 +18,7 @@
         <scala.version>${scala213.version}</scala.version>
         <scala.compat.version>${scala213.compat.version}</scala.compat.version>
         <antlr4.version>4.13.1</antlr4.version>
+        <java.release>17</java.release>
     </properties>
 
     <dependencies>
@@ -143,6 +144,8 @@
                 <configuration>
                     <args>
                         <arg>-feature</arg>
+                        <arg>-release</arg>
+                        <arg>${java.release}</arg>
                     </args>
                 </configuration>
             </plugin>
@@ -151,7 +154,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>${maven-compiler-plugin.version}</version>
                 <configuration>
-                    <release>17</release>
+                    <release>${java.release}</release>
                 </configuration>
             </plugin>
             <plugin>
@@ -195,4 +198,12 @@
             </plugin>
         </plugins>
     </build>
+    <profiles>
+        <profile>
+            <id>java21</id>
+            <properties>
+                <java.release>21</java.release>
+            </properties>
+        </profile>
+    </profiles>
 </project>

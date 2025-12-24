@@ -25,10 +25,9 @@ import org.lance.Dataset
 import org.lance.index.{Index, IndexOptions, IndexParams, IndexType}
 import org.lance.index.scalar.ScalarIndexParams
 import org.lance.operation.{CreateIndex => AddIndexOperation}
-import org.lance.spark.{LanceConfig, LanceDataset, SparkOptions}
-import org.lance.spark.internal.LanceDatasetAdapter
+import org.lance.spark.{LanceDataset, LanceRuntime, LanceSparkReadOptions}
 
-import java.util.{Collections, UUID}
+import java.util.{Collections, Optional, UUID}
 
 import scala.jdk.CollectionConverters._
 
@@ -80,22 +79,30 @@ case class AddIndexExec(
       case _ => throw new UnsupportedOperationException("AddIndex only supports LanceDataset")
     }
 
-    val config = lanceDataset.config()
+    val readOptions = lanceDataset.readOptions()
 
     val indexType = IndexTypeUtils.buildIndexType(method)
 
-    val uuid = UUID.randomUUID()
-    val fragmentIds = LanceDatasetAdapter.getFragmentIds(config).asScala
+    val fragmentIds = {
+      val ds = openDataset(readOptions)
+      try {
+        ds.getFragments.asScala.map(_.getId).map(Integer.valueOf).toList
+      } finally {
+        ds.close()
+      }
+    }
 
     if (fragmentIds.isEmpty) {
       // No fragments to index
       return Seq(new GenericInternalRow(Array[Any](0L, UTF8String.fromString(indexName))))
     }
 
+    val uuid = UUID.randomUUID()
+
     // Build per-fragment tasks
     val tasks = fragmentIds.map { fid =>
       IndexTaskExecutor.create(
-        config,
+        readOptions,
         columns,
         method.toLowerCase,
         toJson(args),
@@ -107,16 +114,11 @@ case class AddIndexExec(
     val rdd = session.sparkContext.parallelize(tasks, tasks.size)
     rdd.map(t => t.execute()).collect() // ensure execution
 
-    // Merge index metadata after all fragments are indexed
-    LanceDatasetAdapter.mergeIndexMetadata(config, uuid.toString, indexType)
-
-    // Commit the index by writing metadata
-    val uri = config.getDatasetUri
-    val options = SparkOptions.genReadOptionFromConfig(config)
-
-    val dataset =
-      Dataset.open().allocator(LanceDatasetAdapter.allocator).uri(uri).readOptions(options).build()
+    val dataset = openDataset(readOptions)
     try {
+      // Merge index metadata after all fragments are indexed
+      dataset.mergeIndexMetadata(uuid.toString, indexType, Optional.empty())
+
       val fieldIds = dataset.getLanceSchema.fields().asScala
         .filter(f => columns.contains(f.getName))
         .map(_.getId)
@@ -150,6 +152,22 @@ case class AddIndexExec(
       fragmentIds.size.toLong,
       UTF8String.fromString(indexName))))
   }
+
+  private def openDataset(readOptions: LanceSparkReadOptions): Dataset = {
+    if (readOptions.hasNamespace) {
+      Dataset.open()
+        .allocator(LanceRuntime.allocator())
+        .namespace(readOptions.getNamespace)
+        .tableId(readOptions.getTableId)
+        .build()
+    } else {
+      Dataset.open()
+        .allocator(LanceRuntime.allocator())
+        .uri(readOptions.getDatasetUri)
+        .readOptions(readOptions.toReadOptions)
+        .build()
+    }
+  }
 }
 
 case class IndexTaskExecutor(
@@ -161,14 +179,15 @@ case class IndexTaskExecutor(
     uuid: String,
     fragmentId: Int) extends Serializable {
   def execute(): String = {
-    val cfg = decode[LanceConfig](lanceConf)
-    val cols = decode[Array[String]](columnsEnc).toSeq
+    val readOptions = decode[LanceSparkReadOptions](lanceConf)
+    val columns = decode[Array[String]](columnsEnc).toSeq
     val indexType = IndexTypeUtils.buildIndexType(method)
     val params = IndexParams.builder()
       .setScalarIndexParams(ScalarIndexParams.create(method, json))
       .build()
-    val colsJava = java.util.Arrays.asList(cols: _*)
-    val opts = IndexOptions
+    val colsJava = java.util.Arrays.asList(columns: _*)
+
+    val indexOptions = IndexOptions
       .builder(colsJava, indexType, params)
       .replace(true)
       .withIndexName(indexName)
@@ -176,14 +195,32 @@ case class IndexTaskExecutor(
       .withFragmentIds(Collections.singletonList(fragmentId))
       .build()
 
-    LanceDatasetAdapter.createIndex(cfg, opts)
+    val dataset = if (readOptions.hasNamespace) {
+      Dataset.open()
+        .allocator(LanceRuntime.allocator())
+        .namespace(readOptions.getNamespace)
+        .tableId(readOptions.getTableId)
+        .build()
+    } else {
+      Dataset.open()
+        .allocator(LanceRuntime.allocator())
+        .uri(readOptions.getDatasetUri)
+        .readOptions(readOptions.toReadOptions)
+        .build()
+    }
+    try {
+      dataset.createIndex(indexOptions)
+    } finally {
+      dataset.close()
+    }
+
     encode("OK")
   }
 }
 
 object IndexTaskExecutor {
   def create(
-      lanceConf: LanceConfig,
+      readOptions: LanceSparkReadOptions,
       cols: Seq[String],
       method: String,
       json: String,
@@ -191,7 +228,7 @@ object IndexTaskExecutor {
       uuid: String,
       fragmentId: Int): IndexTaskExecutor = {
     IndexTaskExecutor(
-      encode(lanceConf),
+      encode(readOptions),
       encode(cols.toArray),
       method,
       json,

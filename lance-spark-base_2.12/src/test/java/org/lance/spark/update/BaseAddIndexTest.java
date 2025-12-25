@@ -13,6 +13,8 @@
  */
 package org.lance.spark.update;
 
+import org.lance.index.Index;
+
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -23,8 +25,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -38,6 +43,7 @@ public abstract class BaseAddIndexTest {
   protected SparkSession spark;
 
   @TempDir Path tempDir;
+  protected String tableDir;
 
   @BeforeEach
   public void setup() throws IOException {
@@ -57,6 +63,8 @@ public abstract class BaseAddIndexTest {
             .getOrCreate();
     this.tableName = "create_index_test_" + UUID.randomUUID().toString().replace("-", "");
     this.fullTable = this.catalogName + ".default." + this.tableName;
+    this.tableDir =
+        FileSystems.getDefault().getPath(testRoot, this.tableName + ".lance").toString();
   }
 
   @AfterEach
@@ -113,6 +121,9 @@ public abstract class BaseAddIndexTest {
     Row r = query.collectAsList().get(0);
     Assertions.assertEquals(5, r.getInt(0));
     Assertions.assertEquals("text_5", r.getString(1));
+
+    // Check index is created successfully
+    checkIndex("test_index");
   }
 
   @Test
@@ -132,6 +143,9 @@ public abstract class BaseAddIndexTest {
     Assertions.assertTrue(fragmentsIndexed1 >= 2, "Expected at least 2 fragments to be indexed");
     Assertions.assertEquals("test_index_repeat", indexName1);
 
+    // Check index is created successfully
+    checkIndex("test_index_repeat");
+
     Dataset<Row> result2 =
         spark.sql(
             String.format(
@@ -144,6 +158,9 @@ public abstract class BaseAddIndexTest {
     String indexName2 = row2.getString(1);
     Assertions.assertTrue(fragmentsIndexed2 >= 2, "Expected at least 2 fragments to be indexed");
     Assertions.assertEquals("test_index_repeat", indexName2);
+
+    // Check index is created successfully
+    checkIndex("test_index_repeat");
   }
 
   @Test
@@ -167,11 +184,26 @@ public abstract class BaseAddIndexTest {
     Assertions.assertTrue(fragmentsIndexed >= 2, "Expected at least 2 fragments to be indexed");
     Assertions.assertEquals("test_index_btree_param", indexName);
 
+    checkIndex("test_index_btree_param");
+
     // Verify query using the indexed field with zone_size parameter
     Dataset<Row> query = spark.sql(String.format("select * from %s where id=15", fullTable));
     Assertions.assertEquals(1L, query.count());
     Row r = query.collectAsList().get(0);
     Assertions.assertEquals(15, r.getInt(0));
     Assertions.assertEquals("text_15", r.getString(1));
+  }
+
+  private void checkIndex(String indexName) {
+    // Check index is created successfully
+    org.lance.Dataset lanceDataset = org.lance.Dataset.open().uri(tableDir).build();
+    try {
+      List<Index> indexList = lanceDataset.getIndexes();
+      Assertions.assertTrue(indexList.size() >= 1);
+      Set<String> indexNames = indexList.stream().map(Index::name).collect(Collectors.toSet());
+      Assertions.assertTrue(indexNames.contains(indexName));
+    } finally {
+      lanceDataset.close();
+    }
   }
 }

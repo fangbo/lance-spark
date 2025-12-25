@@ -81,8 +81,7 @@ case class AddIndexExec(
 
     val readOptions = lanceDataset.readOptions()
 
-    val indexType = IndexTypeUtils.buildIndexType(method)
-
+    // Get all fragment id list from dataset
     val fragmentIds = {
       val ds = openDataset(readOptions)
       try {
@@ -98,6 +97,7 @@ case class AddIndexExec(
     }
 
     val uuid = UUID.randomUUID()
+    val indexType = IndexTypeUtils.buildIndexType(method)
 
     // Build per-fragment tasks
     val tasks = fragmentIds.map { fid =>
@@ -138,12 +138,9 @@ case class AddIndexExec(
 
       val op = AddIndexOperation.builder().withNewIndices(Collections.singletonList(index)).build()
       val newDataset = dataset.newTransactionBuilder().operation(op).build().commit()
-      try {
-        // close the committed new dataset to release resources
-        newDataset.close()
-      } finally {
-        ()
-      }
+
+      // close the committed new dataset to release resources
+      newDataset.close()
     } finally {
       dataset.close()
     }
@@ -185,10 +182,9 @@ case class IndexTaskExecutor(
     val params = IndexParams.builder()
       .setScalarIndexParams(ScalarIndexParams.create(method, json))
       .build()
-    val colsJava = java.util.Arrays.asList(columns: _*)
 
     val indexOptions = IndexOptions
-      .builder(colsJava, indexType, params)
+      .builder(java.util.Arrays.asList(columns: _*), indexType, params)
       .replace(true)
       .withIndexName(indexName)
       .withIndexUUID(uuid)

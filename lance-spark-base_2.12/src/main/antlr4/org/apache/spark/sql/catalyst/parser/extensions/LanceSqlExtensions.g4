@@ -20,6 +20,7 @@ singleStatement
 
 statement
     : ALTER TABLE multipartIdentifier ADD COLUMNS columnList FROM identifier                    #addColumnsBackfill
+    | ALTER TABLE multipartIdentifier CREATE INDEX indexName=identifier USING method=identifier '(' columnList ')' (WITH '(' (namedArgument (',' namedArgument)*)? ')')? #createIndex
     | OPTIMIZE multipartIdentifier (WITH '(' (namedArgument (',' namedArgument)*)? ')')?        #optimize
     | VACUUM multipartIdentifier (WITH '(' (namedArgument (',' namedArgument)*)? ')')?          #vacuum
     ;
@@ -64,9 +65,12 @@ number
 ADD: 'ADD';
 ALTER: 'ALTER';
 COLUMNS: 'COLUMNS';
+CREATE: 'CREATE';
 FROM: 'FROM';
+INDEX: 'INDEX';
 OPTIMIZE: 'OPTIMIZE';
 TABLE: 'TABLE';
+USING: 'USING';
 VACUUM: 'VACUUM';
 WITH: 'WITH';
 

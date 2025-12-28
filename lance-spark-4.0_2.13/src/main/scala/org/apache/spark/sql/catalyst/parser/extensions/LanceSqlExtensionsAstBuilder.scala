@@ -15,7 +15,7 @@ package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedIdentifier, UnresolvedRelation}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{AddColumnsBackfill, LogicalPlan, NamedArgument, Optimize, Vacuum}
+import org.apache.spark.sql.catalyst.plans.logical.{AddColumnsBackfill, AddIndex, LogicalPlan, NamedArgument, Optimize, Vacuum}
 
 import scala.jdk.CollectionConverters._
 
@@ -67,6 +67,20 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
       .toSeq
 
     Vacuum(table, args)
+  }
+
+  override def visitCreateIndex(ctx: LanceSqlExtensionsParser.CreateIndexContext): AddIndex = {
+    val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
+    val indexName = ctx.indexName.getText
+    val method = ctx.method.getText
+    val columns = visitColumnList(ctx.columnList())
+    val args = ctx.namedArgument().asScala.map(a =>
+      NamedArgument(
+        a.identifier().getText,
+        a.constant().accept(this)))
+      .toSeq
+
+    AddIndex(table, indexName, method, columns, args)
   }
 
   override def visitStringLiteral(ctx: LanceSqlExtensionsParser.StringLiteralContext): String = {

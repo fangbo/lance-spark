@@ -8,5 +8,6 @@ nav:
   - show-tables.md
   - describe-table.md
   - drop-table.md
+  - create-index.md
   - optimize.md
   - vacuum.md

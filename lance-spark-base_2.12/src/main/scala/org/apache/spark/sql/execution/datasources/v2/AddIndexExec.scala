@@ -249,6 +249,7 @@ object IndexTypeUtils {
   def buildIndexType(method: String): IndexType = {
     method.toLowerCase match {
       case "btree" => IndexType.BTREE
+      case "fts" => IndexType.INVERTED
       case other => throw new UnsupportedOperationException(s"Unsupported index method: $other")
     }
   }

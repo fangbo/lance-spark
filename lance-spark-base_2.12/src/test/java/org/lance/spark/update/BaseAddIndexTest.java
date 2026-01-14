@@ -194,6 +194,135 @@ public abstract class BaseAddIndexTest {
     Assertions.assertEquals("text_15", r.getString(1));
   }
 
+  @Test
+  public void testCreateFtsIndex() {
+    prepareDataset();
+
+    // FTS requires all InvertedIndexDetails fields to be specified
+    Dataset<Row> result =
+        spark.sql(
+            String.format(
+                "alter table %s create index test_fts_index using fts (text) with ("
+                    + "base_tokenizer='simple', "
+                    + "language='English', "
+                    + "max_token_length=40, "
+                    + "lower_case=true, "
+                    + "stem=false, "
+                    + "remove_stop_words=false, "
+                    + "ascii_folding=false, "
+                    + "with_position=true"
+                    + ")",
+                fullTable));
+
+    Assertions.assertEquals(
+        "StructType(StructField(fragments_indexed,LongType,true),StructField(index_name,StringType,true))",
+        result.schema().toString());
+
+    Row row = result.collectAsList().get(0);
+    long fragmentsIndexed = row.getLong(0);
+    String indexName = row.getString(1);
+
+    // Verify distributed execution across multiple fragments
+    Assertions.assertTrue(fragmentsIndexed >= 2, "Expected at least 2 fragments to be indexed");
+    Assertions.assertEquals("test_fts_index", indexName);
+
+    // Check index is created successfully
+    checkIndex("test_fts_index");
+
+    // Verify query using the text column
+    Dataset<Row> query =
+        spark.sql(String.format("select * from %s where text='text_5'", fullTable));
+    Assertions.assertEquals(1L, query.count());
+    Row r = query.collectAsList().get(0);
+    Assertions.assertEquals(5, r.getInt(0));
+    Assertions.assertEquals("text_5", r.getString(1));
+  }
+
+  @Test
+  public void testCreateFtsIndexWithStemming() {
+    prepareDataset();
+
+    // Test with stemming enabled
+    Dataset<Row> result =
+        spark.sql(
+            String.format(
+                "alter table %s create index test_fts_stem using fts (text) with ("
+                    + "base_tokenizer='simple', "
+                    + "language='English', "
+                    + "max_token_length=40, "
+                    + "lower_case=true, "
+                    + "stem=true, "
+                    + "remove_stop_words=false, "
+                    + "ascii_folding=false, "
+                    + "with_position=true"
+                    + ")",
+                fullTable));
+
+    Assertions.assertEquals(
+        "StructType(StructField(fragments_indexed,LongType,true),StructField(index_name,StringType,true))",
+        result.schema().toString());
+
+    Row row = result.collectAsList().get(0);
+    long fragmentsIndexed = row.getLong(0);
+    String indexName = row.getString(1);
+
+    Assertions.assertTrue(fragmentsIndexed >= 2, "Expected at least 2 fragments to be indexed");
+    Assertions.assertEquals("test_fts_stem", indexName);
+
+    checkIndex("test_fts_stem");
+  }
+
+  @Test
+  public void testRepeatedCreateFtsIndex() {
+    prepareDataset();
+
+    String ftsOptions =
+        "base_tokenizer='simple', "
+            + "language='English', "
+            + "max_token_length=40, "
+            + "lower_case=true, "
+            + "stem=false, "
+            + "remove_stop_words=false, "
+            + "ascii_folding=false, "
+            + "with_position=true";
+
+    // First FTS index creation
+    Dataset<Row> result1 =
+        spark.sql(
+            String.format(
+                "alter table %s create index test_fts_repeat using fts (text) with (%s)",
+                fullTable, ftsOptions));
+    Assertions.assertEquals(
+        "StructType(StructField(fragments_indexed,LongType,true),StructField(index_name,StringType,true))",
+        result1.schema().toString());
+    Row row1 = result1.collectAsList().get(0);
+    long fragmentsIndexed1 = row1.getLong(0);
+    String indexName1 = row1.getString(1);
+    Assertions.assertTrue(fragmentsIndexed1 >= 2, "Expected at least 2 fragments to be indexed");
+    Assertions.assertEquals("test_fts_repeat", indexName1);
+
+    // Check index is created successfully
+    checkIndex("test_fts_repeat");
+
+    // Second FTS index creation with same name (should replace)
+    Dataset<Row> result2 =
+        spark.sql(
+            String.format(
+                "alter table %s create index test_fts_repeat using fts (text) with (%s)",
+                fullTable, ftsOptions));
+    Assertions.assertEquals(
+        "StructType(StructField(fragments_indexed,LongType,true),StructField(index_name,StringType,true))",
+        result2.schema().toString());
+    Row row2 = result2.collectAsList().get(0);
+    long fragmentsIndexed2 = row2.getLong(0);
+    String indexName2 = row2.getString(1);
+    Assertions.assertTrue(fragmentsIndexed2 >= 2, "Expected at least 2 fragments to be indexed");
+    Assertions.assertEquals("test_fts_repeat", indexName2);
+
+    // Check index still exists after replacement
+    checkIndex("test_fts_repeat");
+  }
+
   private void checkIndex(String indexName) {
     // Check index is created successfully
     org.lance.Dataset lanceDataset = org.lance.Dataset.open().uri(tableDir).build();

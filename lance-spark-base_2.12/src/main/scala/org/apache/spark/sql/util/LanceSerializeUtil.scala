@@ -26,6 +26,7 @@ object LanceSerializeUtil {
     override def initialValue(): Kryo = {
       val kryo = new Kryo()
       kryo.setInstantiatorStrategy(new DefaultInstantiatorStrategy(new StdInstantiatorStrategy()))
+      kryo.setClassLoader(getClass.getClassLoader)
       kryo
     }
   }

@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.vectorized;
+package org.lance.spark.vectorized;
 
 import org.lance.spark.utils.BlobUtils;
 
@@ -27,6 +27,10 @@ import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 import org.apache.spark.sql.types.Decimal;
 import org.apache.spark.sql.util.LanceArrowUtils;
+import org.apache.spark.sql.vectorized.ArrowColumnVector;
+import org.apache.spark.sql.vectorized.ColumnVector;
+import org.apache.spark.sql.vectorized.ColumnarArray;
+import org.apache.spark.sql.vectorized.ColumnarMap;
 import org.apache.spark.unsafe.types.UTF8String;
 
 public class LanceArrowColumnVector extends ColumnVector {

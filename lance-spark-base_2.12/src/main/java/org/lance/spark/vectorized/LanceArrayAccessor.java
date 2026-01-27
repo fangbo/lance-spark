@@ -11,25 +11,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.vectorized;
+package org.lance.spark.vectorized;
 
 import org.apache.arrow.vector.complex.ListVector;
+import org.apache.spark.sql.vectorized.ColumnarArray;
 
-public class LanceArrayAccessor extends ArrowColumnVector.ArrowVectorAccessor {
+public class LanceArrayAccessor {
 
   private final ListVector accessor;
   private final LanceArrowColumnVector arrayData;
 
   public LanceArrayAccessor(ListVector vector) {
-    super(vector);
     this.accessor = vector;
     this.arrayData = new LanceArrowColumnVector(vector.getDataVector());
   }
 
-  @Override
-  final ColumnarArray getArray(int rowId) {
+  public boolean isNullAt(int rowId) {
+    return this.accessor.isNull(rowId);
+  }
+
+  public int getNullCount() {
+    return this.accessor.getNullCount();
+  }
+
+  public ColumnarArray getArray(int rowId) {
     int start = accessor.getElementStartIndex(rowId);
     int end = accessor.getElementEndIndex(rowId);
     return new ColumnarArray(arrayData, start, end - start);
+  }
+
+  public void close() {
+    this.accessor.close();
   }
 }

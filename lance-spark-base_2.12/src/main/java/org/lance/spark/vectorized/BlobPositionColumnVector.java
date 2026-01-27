@@ -11,17 +11,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.vectorized;
+package org.lance.spark.vectorized;
 
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Decimal;
+import org.apache.spark.sql.vectorized.ColumnVector;
+import org.apache.spark.sql.vectorized.ColumnarArray;
+import org.apache.spark.sql.vectorized.ColumnarMap;
 import org.apache.spark.unsafe.types.UTF8String;
 
-/** A column vector that provides the size values from a blob struct. */
-public class BlobSizeColumnVector extends ColumnVector {
+/** A column vector that provides the position values from a blob struct. */
+public class BlobPositionColumnVector extends ColumnVector {
   private final BlobStructAccessor blobAccessor;
 
-  public BlobSizeColumnVector(BlobStructAccessor blobAccessor) {
+  public BlobPositionColumnVector(BlobStructAccessor blobAccessor) {
     super(DataTypes.LongType);
     this.blobAccessor = blobAccessor;
   }
@@ -48,68 +51,68 @@ public class BlobSizeColumnVector extends ColumnVector {
 
   @Override
   public boolean getBoolean(int rowId) {
-    throw new UnsupportedOperationException("Cannot get boolean from blob size");
+    throw new UnsupportedOperationException("Cannot get boolean from blob position");
   }
 
   @Override
   public byte getByte(int rowId) {
-    throw new UnsupportedOperationException("Cannot get byte from blob size");
+    throw new UnsupportedOperationException("Cannot get byte from blob position");
   }
 
   @Override
   public short getShort(int rowId) {
-    throw new UnsupportedOperationException("Cannot get short from blob size");
+    throw new UnsupportedOperationException("Cannot get short from blob position");
   }
 
   @Override
   public int getInt(int rowId) {
-    Long size = blobAccessor.getSize(rowId);
-    return size != null ? size.intValue() : 0;
+    Long position = blobAccessor.getPosition(rowId);
+    return position != null ? position.intValue() : 0;
   }
 
   @Override
   public long getLong(int rowId) {
-    Long size = blobAccessor.getSize(rowId);
-    return size != null ? size : 0L;
+    Long position = blobAccessor.getPosition(rowId);
+    return position != null ? position : 0L;
   }
 
   @Override
   public float getFloat(int rowId) {
-    throw new UnsupportedOperationException("Cannot get float from blob size");
+    throw new UnsupportedOperationException("Cannot get float from blob position");
   }
 
   @Override
   public double getDouble(int rowId) {
-    throw new UnsupportedOperationException("Cannot get double from blob size");
+    throw new UnsupportedOperationException("Cannot get double from blob position");
   }
 
   @Override
   public ColumnarArray getArray(int rowId) {
-    throw new UnsupportedOperationException("Cannot get array from blob size");
+    throw new UnsupportedOperationException("Cannot get array from blob position");
   }
 
   @Override
   public ColumnarMap getMap(int ordinal) {
-    throw new UnsupportedOperationException("Cannot get map from blob size");
+    throw new UnsupportedOperationException("Cannot get map from blob position");
   }
 
   @Override
   public Decimal getDecimal(int rowId, int precision, int scale) {
-    throw new UnsupportedOperationException("Cannot get decimal from blob size");
+    throw new UnsupportedOperationException("Cannot get decimal from blob position");
   }
 
   @Override
   public UTF8String getUTF8String(int rowId) {
-    throw new UnsupportedOperationException("Cannot get string from blob size");
+    throw new UnsupportedOperationException("Cannot get string from blob position");
   }
 
   @Override
   public byte[] getBinary(int rowId) {
-    throw new UnsupportedOperationException("Cannot get binary from blob size");
+    throw new UnsupportedOperationException("Cannot get binary from blob position");
   }
 
   @Override
   public ColumnVector getChild(int ordinal) {
-    throw new UnsupportedOperationException("Blob size has no children");
+    throw new UnsupportedOperationException("Blob position has no children");
   }
 }

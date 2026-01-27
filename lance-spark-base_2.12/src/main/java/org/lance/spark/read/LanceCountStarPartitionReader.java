@@ -18,6 +18,7 @@ import org.lance.ipc.LanceScanner;
 import org.lance.ipc.ScanOptions;
 import org.lance.spark.LanceRuntime;
 import org.lance.spark.LanceSparkReadOptions;
+import org.lance.spark.vectorized.LanceArrowColumnVector;
 
 import com.google.common.collect.Lists;
 import org.apache.arrow.memory.BufferAllocator;
@@ -28,7 +29,6 @@ import org.apache.spark.sql.connector.read.PartitionReader;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.LanceArrowUtils;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
-import org.apache.spark.sql.vectorized.LanceArrowColumnVector;
 
 import java.io.IOException;
 import java.util.List;

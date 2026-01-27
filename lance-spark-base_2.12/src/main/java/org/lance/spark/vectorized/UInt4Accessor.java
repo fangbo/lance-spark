@@ -11,23 +11,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.vectorized;
+package org.lance.spark.vectorized;
 
-import org.apache.arrow.vector.UInt1Vector;
+import org.apache.arrow.vector.UInt4Vector;
 
 /**
- * Accessor for unsigned 8-bit integers (UInt1). Maps to Spark ShortType (signed 16-bit can hold all
- * UInt8 values 0-255).
+ * Accessor for unsigned 32-bit integers (UInt4). Maps to Spark LongType (signed 64-bit can hold all
+ * UInt32 values 0-4294967295).
  */
-public class UInt1Accessor {
-  private final UInt1Vector accessor;
+public class UInt4Accessor {
+  private final UInt4Vector accessor;
 
-  UInt1Accessor(UInt1Vector vector) {
+  UInt4Accessor(UInt4Vector vector) {
     this.accessor = vector;
   }
 
-  final short getShort(int rowId) {
-    return (short) Byte.toUnsignedInt(accessor.get(rowId));
+  final long getLong(int rowId) {
+    return Integer.toUnsignedLong(accessor.get(rowId));
   }
 
   final boolean isNullAt(int rowId) {

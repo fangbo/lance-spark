@@ -15,6 +15,8 @@ package org.lance.spark.internal;
 
 import org.lance.spark.LanceConstant;
 import org.lance.spark.read.LanceInputPartition;
+import org.lance.spark.vectorized.BlobStructAccessor;
+import org.lance.spark.vectorized.LanceArrowColumnVector;
 
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VectorSchemaRoot;
@@ -24,12 +26,10 @@ import org.apache.spark.sql.execution.vectorized.ConstantColumnVector;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-import org.apache.spark.sql.vectorized.BlobStructAccessor;
 import org.apache.spark.sql.vectorized.ColumnVector;
 import org.apache.spark.sql.vectorized.ColumnarArray;
 import org.apache.spark.sql.vectorized.ColumnarBatch;
 import org.apache.spark.sql.vectorized.ColumnarMap;
-import org.apache.spark.sql.vectorized.LanceArrowColumnVector;
 
 import java.io.IOException;
 import java.util.HashMap;

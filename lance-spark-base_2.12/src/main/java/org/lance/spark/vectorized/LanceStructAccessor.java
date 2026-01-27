@@ -11,22 +11,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.vectorized;
+package org.lance.spark.vectorized;
 
 import org.apache.arrow.vector.complex.StructVector;
+import org.apache.spark.sql.vectorized.ColumnVector;
 
 /**
  * Accessor for Arrow StructVector that wraps child vectors in LanceArrowColumnVector. This ensures
  * that nested fields within structs (including arrays) are properly handled by Lance-specific
  * accessors.
  */
-public class LanceStructAccessor extends ArrowColumnVector.ArrowVectorAccessor {
+public class LanceStructAccessor {
 
   private final StructVector accessor;
   private final LanceArrowColumnVector[] childColumns;
 
   public LanceStructAccessor(StructVector vector) {
-    super(vector);
     this.accessor = vector;
 
     // Create LanceArrowColumnVector wrappers for all child vectors
@@ -37,6 +37,14 @@ public class LanceStructAccessor extends ArrowColumnVector.ArrowVectorAccessor {
     }
   }
 
+  public boolean isNullAt(int rowId) {
+    return this.accessor.isNull(rowId);
+  }
+
+  public int getNullCount() {
+    return this.accessor.getNullCount();
+  }
+
   /**
    * Returns the child column vector at the given ordinal.
    *
@@ -45,5 +53,9 @@ public class LanceStructAccessor extends ArrowColumnVector.ArrowVectorAccessor {
    */
   public ColumnVector getChild(int ordinal) {
     return childColumns[ordinal];
+  }
+
+  public void close() {
+    this.accessor.close();
   }
 }

@@ -29,6 +29,7 @@ import org.apache.spark.sql.types._
 import org.apache.spark.sql.util.{ArrowUtils, LanceArrowUtils}
 import org.apache.spark.unsafe.types.UTF8String
 import org.lance.spark.LanceConstant
+import org.lance.spark.vectorized.LanceArrowColumnVector
 import org.scalatest.funsuite.AnyFunSuite
 
 class LanceArrowColumnVectorSuite extends AnyFunSuite {

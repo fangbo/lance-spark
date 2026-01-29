@@ -20,6 +20,15 @@ MODULE := lance-spark-$(SPARK_VERSION)_$(SCALA_VERSION)
 BUNDLE_MODULE := lance-spark-bundle-$(SPARK_VERSION)_$(SCALA_VERSION)
 BASE_MODULE := lance-spark-base_$(SCALA_VERSION)
 
+DOCKER_COMPOSE := $(shell \
+	if docker compose version >/dev/null 2>&1; then \
+		echo "docker compose"; \
+	elif command -v docker-compose >/dev/null 2>&1; then \
+		echo "docker-compose"; \
+	else \
+		echo ""; \
+	fi)
+
 # =============================================================================
 # Parameterized commands (use SPARK_VERSION and SCALA_VERSION)
 # =============================================================================
@@ -78,6 +87,12 @@ clean:
 # Docker commands
 # =============================================================================
 
+.PHONY: check-docker-compose
+  check-docker-compose:
+  ifndef DOCKER_COMPOSE
+        $(error Neither 'docker compose' nor 'docker-compose' found. Please install Docker Compose.)
+  endif
+
 .PHONY: docker-build
 docker-build:
 	$(MAKE) bundle SPARK_VERSION=3.5 SCALA_VERSION=2.12
@@ -85,16 +100,16 @@ docker-build:
 	cd docker && docker compose build --no-cache spark-lance
 
 .PHONY: docker-up
-docker-up:
-	cd docker && docker-compose up -d
+docker-up: check-docker-compose
+	cd docker && ${DOCKER_COMPOSE} up -d
 
 .PHONY: docker-shell
 docker-shell:
 	cd docker && docker exec -it spark-lance bash
 
 .PHONY: docker-down
-docker-down:
-	cd docker && docker-compose down
+docker-down: check-docker-compose
+	cd docker && ${DOCKER_COMPOSE} down
 
 # =============================================================================
 # Documentation

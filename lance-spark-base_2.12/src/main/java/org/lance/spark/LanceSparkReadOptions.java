@@ -15,8 +15,10 @@ package org.lance.spark;
 
 import org.lance.ReadOptions;
 import org.lance.io.StorageOptionsProvider;
+import org.lance.ipc.Query;
 import org.lance.namespace.LanceNamespace;
 import org.lance.namespace.LanceNamespaceStorageOptionsProvider;
+import org.lance.spark.utils.QueryUtils;
 
 import com.google.common.base.Preconditions;
 
@@ -54,6 +56,8 @@ public class LanceSparkReadOptions implements Serializable {
   public static final String CONFIG_METADATA_CACHE_SIZE = "metadata_cache_size";
   public static final String CONFIG_BATCH_SIZE = "batch_size";
   public static final String CONFIG_TOP_N_PUSH_DOWN = "topN_push_down";
+
+  public static final String CONFIG_NEAREST = "nearest";
   public static final String LANCE_FILE_SUFFIX = ".lance";
 
   private static final boolean DEFAULT_PUSH_DOWN_FILTERS = true;
@@ -69,6 +73,7 @@ public class LanceSparkReadOptions implements Serializable {
   private final Integer indexCacheSize;
   private final Integer metadataCacheSize;
   private final int batchSize;
+  private final Query nearest;
   private final boolean topNPushDown;
   private final Map<String, String> storageOptions;
 
@@ -89,6 +94,7 @@ public class LanceSparkReadOptions implements Serializable {
     this.indexCacheSize = builder.indexCacheSize;
     this.metadataCacheSize = builder.metadataCacheSize;
     this.batchSize = builder.batchSize;
+    this.nearest = builder.nearest;
     this.topNPushDown = builder.topNPushDown;
     this.storageOptions = new HashMap<>(builder.storageOptions);
     this.namespace = builder.namespace;
@@ -199,12 +205,20 @@ public class LanceSparkReadOptions implements Serializable {
     return batchSize;
   }
 
+  public Query getNearest() {
+    return nearest;
+  }
+
   public boolean isTopNPushDown() {
     return topNPushDown;
   }
 
   public Map<String, String> getStorageOptions() {
     return storageOptions;
+  }
+
+  public String getNearestJson() {
+    return QueryUtils.queryToString(nearest);
   }
 
   public LanceNamespace getNamespace() {
@@ -269,7 +283,9 @@ public class LanceSparkReadOptions implements Serializable {
 
   @Override
   public boolean equals(Object o) {
-    if (o == null || getClass() != o.getClass()) return false;
+    if (o == null || getClass() != o.getClass()) {
+      return false;
+    }
     LanceSparkReadOptions that = (LanceSparkReadOptions) o;
     return pushDownFilters == that.pushDownFilters
         && batchSize == that.batchSize
@@ -303,6 +319,7 @@ public class LanceSparkReadOptions implements Serializable {
     private String datasetUri;
     private boolean pushDownFilters = DEFAULT_PUSH_DOWN_FILTERS;
     private Integer blockSize;
+    private Query nearest;
     private Integer version;
     private Integer indexCacheSize;
     private Integer metadataCacheSize;
@@ -326,6 +343,20 @@ public class LanceSparkReadOptions implements Serializable {
 
     public Builder blockSize(Integer blockSize) {
       this.blockSize = blockSize;
+      return this;
+    }
+
+    public Builder nearest(Query nearest) {
+      this.nearest = nearest;
+      return this;
+    }
+
+    public Builder nearest(String json) {
+      try {
+        this.nearest = QueryUtils.stringToQuery(json);
+      } catch (Exception e) {
+        throw new IllegalArgumentException("Failed to parse nearest query from json: " + json, e);
+      }
       return this;
     }
 
@@ -399,6 +430,10 @@ public class LanceSparkReadOptions implements Serializable {
       }
       if (options.containsKey(CONFIG_TOP_N_PUSH_DOWN)) {
         this.topNPushDown = Boolean.parseBoolean(options.get(CONFIG_TOP_N_PUSH_DOWN));
+      }
+      if (options.containsKey(CONFIG_NEAREST)) {
+        String json = options.get(CONFIG_NEAREST);
+        nearest(json);
       }
       return this;
     }

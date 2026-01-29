@@ -156,4 +156,23 @@ public abstract class BaseAddColumnsBackfillTest {
             .collectAsList()
             .toString());
   }
+
+  @Test
+  public void testAddStructColumn() {
+    prepareDataset();
+
+    spark.sql(
+        String.format(
+            "create temporary view tmp_view as select _rowaddr, _fragid, named_struct('id', id, 'name', concat('name_', id)) as struct_col from %s;",
+            fullTable));
+    spark.sql(String.format("alter table %s add columns struct_col from tmp_view", fullTable));
+
+    for (Row row :
+        spark.sql(String.format("select id, struct_col from %s", fullTable)).collectAsList()) {
+      int id = row.getInt(0);
+      Row structCol = row.getStruct(1);
+      Assertions.assertEquals(id, structCol.getInt(0));
+      Assertions.assertEquals("name_" + id, structCol.getString(1));
+    }
+  }
 }

@@ -37,15 +37,18 @@ public class SparkPositionDeltaWriteBuilder implements DeltaWriteBuilder {
 
   private final Map<String, String> namespaceProperties;
   private final List<String> tableId;
+  private final List<String> updatedColumns;
 
   public SparkPositionDeltaWriteBuilder(
       StructType sparkSchema,
+      List<String> updatedColumns,
       LanceSparkWriteOptions writeOptions,
       Map<String, String> initialStorageOptions,
       String namespaceImpl,
       Map<String, String> namespaceProperties,
       List<String> tableId) {
     this.sparkSchema = sparkSchema;
+    this.updatedColumns = updatedColumns;
     this.writeOptions = writeOptions;
     this.initialStorageOptions = initialStorageOptions;
     this.namespaceImpl = namespaceImpl;
@@ -56,6 +59,7 @@ public class SparkPositionDeltaWriteBuilder implements DeltaWriteBuilder {
   public DeltaWrite build() {
     return new SparkPositionDeltaWrite(
         sparkSchema,
+        updatedColumns,
         writeOptions,
         initialStorageOptions,
         namespaceImpl,

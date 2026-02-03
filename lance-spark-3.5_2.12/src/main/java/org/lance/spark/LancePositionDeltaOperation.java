@@ -25,10 +25,15 @@ import org.apache.spark.sql.connector.write.RowLevelOperation;
 import org.apache.spark.sql.connector.write.SupportsDelta;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 
 public class LancePositionDeltaOperation implements RowLevelOperation, SupportsDelta {
+  private static final Logger LOG = LoggerFactory.getLogger(LancePositionDeltaOperation.class);
+
   private final Command command;
   private final StructType sparkSchema;
   private final LanceSparkReadOptions readOptions;
@@ -43,6 +48,8 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
   private final String namespaceImpl;
 
   private final Map<String, String> namespaceProperties;
+
+  private List<String> updatedColumns;
 
   public LancePositionDeltaOperation(
       Command command,
@@ -82,6 +89,7 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
             .build();
     return new SparkPositionDeltaWriteBuilder(
         sparkSchema,
+        updatedColumns,
         writeOptions,
         initialStorageOptions,
         namespaceImpl,
@@ -103,6 +111,15 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
 
   @Override
   public boolean representUpdateAsDeleteAndInsert() {
-    return true;
+    return !LanceSparkWriteOptions.builder()
+        .datasetUri(readOptions.getDatasetUri())
+        .storageOptions(readOptions.getStorageOptions())
+        .build()
+        .rewriteColumns();
+  }
+
+  public void setUpdatedColumns(List<String> updatedColumns) {
+    LOG.info("Set updated columns: {}", updatedColumns);
+    this.updatedColumns = updatedColumns;
   }
 }

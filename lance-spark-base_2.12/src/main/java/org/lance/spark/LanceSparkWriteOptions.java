@@ -55,11 +55,13 @@ public class LanceSparkWriteOptions implements Serializable {
   public static final String CONFIG_USE_QUEUED_WRITE_BUFFER = "use_queued_write_buffer";
   public static final String CONFIG_QUEUE_DEPTH = "queue_depth";
   public static final String CONFIG_BATCH_SIZE = "batch_size";
+  public static final String REWRITE_COLUMNS = "rewrite_columns";
 
   private static final WriteMode DEFAULT_WRITE_MODE = WriteMode.APPEND;
   private static final boolean DEFAULT_USE_QUEUED_WRITE_BUFFER = false;
   private static final int DEFAULT_QUEUE_DEPTH = 8;
   private static final int DEFAULT_BATCH_SIZE = 512;
+  private static final boolean DEFAULT_REWRITE_COLUMNS = true;
 
   private final String datasetUri;
   private final WriteMode writeMode;
@@ -70,6 +72,7 @@ public class LanceSparkWriteOptions implements Serializable {
   private final boolean useQueuedWriteBuffer;
   private final int queueDepth;
   private final int batchSize;
+  private final boolean rewriteColumns;
   private final Map<String, String> storageOptions;
 
   /** The namespace for credential vending. Transient as LanceNamespace is not serializable. */
@@ -88,6 +91,7 @@ public class LanceSparkWriteOptions implements Serializable {
     this.useQueuedWriteBuffer = builder.useQueuedWriteBuffer;
     this.queueDepth = builder.queueDepth;
     this.batchSize = builder.batchSize;
+    this.rewriteColumns = builder.rewriteColumns;
     this.storageOptions = new HashMap<>(builder.storageOptions);
     this.namespace = builder.namespace;
     this.tableId = builder.tableId;
@@ -155,6 +159,10 @@ public class LanceSparkWriteOptions implements Serializable {
 
   public int getBatchSize() {
     return batchSize;
+  }
+
+  public boolean rewriteColumns() {
+    return rewriteColumns;
   }
 
   public Map<String, String> getStorageOptions() {
@@ -240,6 +248,7 @@ public class LanceSparkWriteOptions implements Serializable {
         && Objects.equals(maxRowsPerGroup, that.maxRowsPerGroup)
         && Objects.equals(maxBytesPerFile, that.maxBytesPerFile)
         && dataStorageVersion == that.dataStorageVersion
+        && rewriteColumns == that.rewriteColumns
         && Objects.equals(storageOptions, that.storageOptions)
         && Objects.equals(tableId, that.tableId);
   }
@@ -256,6 +265,7 @@ public class LanceSparkWriteOptions implements Serializable {
         useQueuedWriteBuffer,
         queueDepth,
         batchSize,
+        rewriteColumns,
         storageOptions,
         tableId);
   }
@@ -271,6 +281,7 @@ public class LanceSparkWriteOptions implements Serializable {
     private boolean useQueuedWriteBuffer = DEFAULT_USE_QUEUED_WRITE_BUFFER;
     private int queueDepth = DEFAULT_QUEUE_DEPTH;
     private int batchSize = DEFAULT_BATCH_SIZE;
+    private boolean rewriteColumns = DEFAULT_REWRITE_COLUMNS;
     private Map<String, String> storageOptions = new HashMap<>();
     private LanceNamespace namespace;
     private List<String> tableId;
@@ -319,6 +330,11 @@ public class LanceSparkWriteOptions implements Serializable {
 
     public Builder batchSize(int batchSize) {
       this.batchSize = batchSize;
+      return this;
+    }
+
+    public Builder rewriteColumns(boolean rewriteColumns) {
+      this.rewriteColumns = rewriteColumns;
       return this;
     }
 
@@ -372,6 +388,9 @@ public class LanceSparkWriteOptions implements Serializable {
         int parsedBatchSize = Integer.parseInt(options.get(CONFIG_BATCH_SIZE));
         Preconditions.checkArgument(parsedBatchSize > 0, "batch_size must be positive");
         this.batchSize = parsedBatchSize;
+      }
+      if (options.containsKey(REWRITE_COLUMNS)) {
+        this.rewriteColumns = Boolean.parseBoolean(options.get(REWRITE_COLUMNS));
       }
       return this;
     }

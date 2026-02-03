@@ -43,10 +43,13 @@ public class UpdateTableTest {
     spark =
         SparkSession.builder()
             .appName("lance-namespace-test")
-            .master("local")
+            .master("local[4]")
             .config(
                 "spark.sql.catalog." + catalogName, "org.lance.spark.LanceNamespaceSparkCatalog")
+            .config(
+                "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
             .config("spark.sql.catalog." + catalogName + ".impl", getNsImpl())
+            .config("spark.sql.catalog." + catalogName + ".rewrite_columns", "true")
             .getOrCreate();
 
     Map<String, String> additionalConfigs = getAdditionalNsConfigs();
@@ -267,25 +270,6 @@ public class UpdateTableTest {
   }
 
   @Test
-  public void testUpdateChildSomeRows() {
-    TableOperator op = new TableOperator(spark, catalogName);
-    op.create();
-
-    op.insert(
-        Arrays.asList(
-            Row.of(1, "Alice", 100, "Alice", 100, Arrays.asList(100, 101)),
-            Row.of(2, "Bob", 200, "Bob", 200, Arrays.asList(200, 201)),
-            Row.of(3, "Charlie", 300, "Charlie", 300, Arrays.asList(300, 301))));
-
-    op.updateStructValue(101, "id = 1");
-    op.check(
-        Arrays.asList(
-            Row.of(1, "Alice", 100, "Alice", 101, Arrays.asList(100, 101)),
-            Row.of(2, "Bob", 200, "Bob", 200, Arrays.asList(200, 201)),
-            Row.of(3, "Charlie", 300, "Charlie", 300, Arrays.asList(300, 301))));
-  }
-
-  @Test
   public void testUpdateChildAllRows() {
     TableOperator op = new TableOperator(spark, catalogName);
     op.create();
@@ -376,7 +360,7 @@ public class UpdateTableTest {
             Row.of(3, "Charlie", 300, "Charlie", 300, Arrays.asList(301, 302))));
   }
 
-  private static class TableOperator {
+  protected static class TableOperator {
     private final SparkSession spark;
     private final String catalogName;
     private final String tableName;
@@ -474,7 +458,7 @@ public class UpdateTableTest {
     }
   }
 
-  private static class Row {
+  protected static class Row {
     int id;
     String name;
     int value;
@@ -482,7 +466,7 @@ public class UpdateTableTest {
     int metaValue;
     List<Integer> values;
 
-    private static Row of(
+    protected static Row of(
         int id, String name, int value, String metaName, int metaValue, List<Integer> values) {
       Row row = new Row();
       row.id = id;

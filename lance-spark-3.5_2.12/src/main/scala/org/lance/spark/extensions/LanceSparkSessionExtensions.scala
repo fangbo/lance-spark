@@ -13,8 +13,8 @@
  */
 package org.lance.spark.extensions
 
-import org.apache.spark.sql.SparkSessionExtensions
-import org.apache.spark.sql.catalyst.optimizer.LanceFragmentAwareJoinRule
+import org.apache.spark.sql.{SparkSession, SparkSessionExtensions}
+import org.apache.spark.sql.catalyst.optimizer.{LanceFragmentAwareJoinRule, UpdateColumnsExtractor}
 import org.apache.spark.sql.catalyst.parser.extensions.LanceSparkSqlExtensionsParser
 import org.apache.spark.sql.execution.datasources.v2.LanceDataSourceV2Strategy
 
@@ -26,6 +26,11 @@ class LanceSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // optimizer rules for fragment-aware joins
     extensions.injectOptimizerRule(_ => LanceFragmentAwareJoinRule())
+
+    // optimizer rules for update using RewriteColumns mode
+    extensions.injectOptimizerRule { session: SparkSession =>
+      new UpdateColumnsExtractor(session)
+    }
 
     extensions.injectPlannerStrategy(LanceDataSourceV2Strategy(_))
   }

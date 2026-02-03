@@ -13,36 +13,34 @@
  */
 package org.lance.spark.update;
 
+import org.lance.spark.utils.SparkUtil;
+
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.junit.jupiter.api.BeforeEach;
-import org.lance.spark.utils.SparkUtil;
 
-import java.util.Map;
-
-public class UpdateTableTest extends BaseUpdateTableTest {
+public class MergeIntoRewriteRowsTest extends BaseMergeIntoTest {
   @BeforeEach
   void setup() {
     spark =
         SparkSession.builder()
-            .appName("lance-namespace-test")
+            .appName("lance-merge-into-distribution-test")
             .master("local[4]")
             .config(
                 "spark.sql.catalog." + catalogName, "org.lance.spark.LanceNamespaceSparkCatalog")
             .config(
                 "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
-            .config("spark.sql.catalog." + catalogName + ".impl", getNsImpl())
+            .config("spark.sql.catalog." + catalogName + ".impl", "dir")
+            .config("spark.sql.catalog." + catalogName + ".root", tempDir.toString())
+            .config("spark.sql.shuffle.partitions", String.valueOf(SHUFFLE_PARTITIONS))
+            .config("spark.sql.adaptive.enabled", "false")
+            .config("spark.default.parallelism", String.valueOf(SHUFFLE_PARTITIONS))
+            .config("spark.ui.enabled", "false")
             .getOrCreate();
 
-    Map<String, String> additionalConfigs = getAdditionalNsConfigs();
-    for (Map.Entry<String, String> entry : additionalConfigs.entrySet()) {
-      spark.conf().set("spark.sql.catalog." + catalogName + "." + entry.getKey(), entry.getValue());
-    }
-
-    spark.conf().set(SparkUtil.REWRITE_COLUMNS, "true");
+    // Use RewriteRows mode to do update/merge-into
+    spark.conf().set(SparkUtil.REWRITE_COLUMNS, "false");
 
     catalog = (TableCatalog) spark.sessionState().catalogManager().catalog(catalogName);
-    // Create default namespace for multi-level namespace mode
-    spark.sql("CREATE NAMESPACE IF NOT EXISTS " + catalogName + ".default");
   }
 }

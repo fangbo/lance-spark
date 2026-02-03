@@ -17,6 +17,9 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.spark.sql.SparkSession;
 
 public class SparkUtil {
+  private static final String SPARK_LANCE_CONF_PREFIX = "spark.sql.lance";
+
+  public static final String REWRITE_COLUMNS = SPARK_LANCE_CONF_PREFIX + ".rewrite_columns";
 
   private static final String SPARK_CATALOG_CONF_PREFIX = "spark.sql.catalog";
   // Format string used as the prefix for Spark configuration keys to override Hadoop configuration
@@ -65,5 +68,15 @@ public class SparkUtil {
 
   private static String hadoopConfPrefixForCatalog(String catalogName) {
     return String.format(SPARK_CATALOG_HADOOP_CONF_OVERRIDE_FMT_STR, catalogName);
+  }
+
+  /**
+   * Check if update/merge-into use RewriteColumns mode or not. Default value is false.
+   *
+   * @param spark spark current session
+   * @return true means that RewriteColumns mode is used. false means that RewriteRows mode is used.
+   */
+  public static boolean rewriteColumns(SparkSession spark) {
+    return Boolean.parseBoolean(spark.conf().get(REWRITE_COLUMNS, "false"));
   }
 }

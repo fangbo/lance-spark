@@ -3,5 +3,6 @@ nav:
   - insert-into.md
   - update.md
   - delete.md
+  - merge-into.md
   - add-columns.md
   - update-columns.md

@@ -14,8 +14,10 @@
 package org.lance.spark;
 
 import org.lance.spark.read.LanceScanBuilder;
+import org.lance.spark.utils.SparkUtil;
 import org.lance.spark.write.SparkPositionDeltaWriteBuilder;
 
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.expressions.Expressions;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.read.ScanBuilder;
@@ -26,9 +28,11 @@ import org.apache.spark.sql.connector.write.SupportsDelta;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
+import java.util.List;
 import java.util.Map;
 
 public class LancePositionDeltaOperation implements RowLevelOperation, SupportsDelta {
+
   private final Command command;
   private final StructType sparkSchema;
   private final LanceSparkReadOptions readOptions;
@@ -43,6 +47,8 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
   private final String namespaceImpl;
 
   private final Map<String, String> namespaceProperties;
+
+  private List<String> updatedColumns;
 
   public LancePositionDeltaOperation(
       Command command,
@@ -82,6 +88,7 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
             .build();
     return new SparkPositionDeltaWriteBuilder(
         sparkSchema,
+        updatedColumns,
         writeOptions,
         initialStorageOptions,
         namespaceImpl,
@@ -103,6 +110,10 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
 
   @Override
   public boolean representUpdateAsDeleteAndInsert() {
-    return true;
+    return !SparkUtil.rewriteColumns(SparkSession.active());
+  }
+
+  public void setUpdatedColumns(List<String> updatedColumns) {
+    this.updatedColumns = updatedColumns;
   }
 }

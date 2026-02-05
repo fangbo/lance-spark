@@ -114,20 +114,22 @@ public class SparkWrite implements Write {
     @Override
     public Write build() {
       LanceSparkWriteOptions options =
-          LanceSparkWriteOptions.builder()
-              .storageOptions(writeOptions.getStorageOptions())
-              .namespace(writeOptions.getNamespace())
-              .tableId(writeOptions.getTableId())
-              .batchSize(writeOptions.getBatchSize())
-              .datasetUri(writeOptions.getDatasetUri())
-              .dataStorageVersion(writeOptions.getDataStorageVersion())
-              .maxBytesPerFile(writeOptions.getMaxBytesPerFile())
-              .maxRowsPerFile(writeOptions.getMaxRowsPerFile())
-              .maxRowsPerGroup(writeOptions.getMaxRowsPerGroup())
-              .queueDepth(writeOptions.getQueueDepth())
-              .useQueuedWriteBuffer(writeOptions.isUseQueuedWriteBuffer())
-              .writeMode(overwrite ? WriteParams.WriteMode.OVERWRITE : writeOptions.getWriteMode())
-              .build();
+          !overwrite
+              ? writeOptions
+              : LanceSparkWriteOptions.builder()
+                  .storageOptions(writeOptions.getStorageOptions())
+                  .namespace(writeOptions.getNamespace())
+                  .tableId(writeOptions.getTableId())
+                  .batchSize(writeOptions.getBatchSize())
+                  .datasetUri(writeOptions.getDatasetUri())
+                  .dataStorageVersion(writeOptions.getDataStorageVersion())
+                  .maxBytesPerFile(writeOptions.getMaxBytesPerFile())
+                  .maxRowsPerFile(writeOptions.getMaxRowsPerFile())
+                  .maxRowsPerGroup(writeOptions.getMaxRowsPerGroup())
+                  .queueDepth(writeOptions.getQueueDepth())
+                  .useQueuedWriteBuffer(writeOptions.isUseQueuedWriteBuffer())
+                  .writeMode(WriteParams.WriteMode.OVERWRITE)
+                  .build();
 
       return new SparkWrite(
           schema,

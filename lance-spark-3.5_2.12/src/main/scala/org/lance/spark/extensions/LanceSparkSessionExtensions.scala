@@ -28,7 +28,9 @@ class LanceSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectOptimizerRule(_ => LanceFragmentAwareJoinRule())
 
     // optimizer rules for update using RewriteColumns mode
-    extensions.injectOptimizerRule(_ => UpdateColumnsExtractor())
+    extensions.injectOptimizerRule { session: SparkSession =>
+      new UpdateColumnsExtractor(session)
+    }
 
     extensions.injectPlannerStrategy(LanceDataSourceV2Strategy(_))
   }

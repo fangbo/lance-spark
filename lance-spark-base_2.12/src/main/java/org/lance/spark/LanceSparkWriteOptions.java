@@ -55,7 +55,6 @@ public class LanceSparkWriteOptions implements Serializable {
   public static final String CONFIG_USE_QUEUED_WRITE_BUFFER = "use_queued_write_buffer";
   public static final String CONFIG_QUEUE_DEPTH = "queue_depth";
   public static final String CONFIG_BATCH_SIZE = "batch_size";
-  public static final String REWRITE_COLUMNS = "rewrite_columns";
 
   private static final WriteMode DEFAULT_WRITE_MODE = WriteMode.APPEND;
   private static final boolean DEFAULT_USE_QUEUED_WRITE_BUFFER = false;
@@ -159,10 +158,6 @@ public class LanceSparkWriteOptions implements Serializable {
 
   public int getBatchSize() {
     return batchSize;
-  }
-
-  public boolean rewriteColumns() {
-    return rewriteColumns;
   }
 
   public Map<String, String> getStorageOptions() {
@@ -388,9 +383,6 @@ public class LanceSparkWriteOptions implements Serializable {
         int parsedBatchSize = Integer.parseInt(options.get(CONFIG_BATCH_SIZE));
         Preconditions.checkArgument(parsedBatchSize > 0, "batch_size must be positive");
         this.batchSize = parsedBatchSize;
-      }
-      if (options.containsKey(REWRITE_COLUMNS)) {
-        this.rewriteColumns = Boolean.parseBoolean(options.get(REWRITE_COLUMNS));
       }
       return this;
     }

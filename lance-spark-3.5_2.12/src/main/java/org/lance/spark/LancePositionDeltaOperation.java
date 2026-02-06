@@ -14,8 +14,10 @@
 package org.lance.spark;
 
 import org.lance.spark.read.LanceScanBuilder;
+import org.lance.spark.utils.SparkUtil;
 import org.lance.spark.write.SparkPositionDeltaWriteBuilder;
 
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.expressions.Expressions;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.read.ScanBuilder;
@@ -111,11 +113,7 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
 
   @Override
   public boolean representUpdateAsDeleteAndInsert() {
-    return !LanceSparkWriteOptions.builder()
-        .datasetUri(readOptions.getDatasetUri())
-        .storageOptions(readOptions.getStorageOptions())
-        .build()
-        .rewriteColumns();
+    return !SparkUtil.rewriteColumns(SparkSession.active());
   }
 
   public void setUpdatedColumns(List<String> updatedColumns) {

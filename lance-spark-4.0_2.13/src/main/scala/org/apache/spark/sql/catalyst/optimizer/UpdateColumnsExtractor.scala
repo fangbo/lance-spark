@@ -13,6 +13,7 @@
  */
 package org.apache.spark.sql.catalyst.optimizer
 
+import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.ProjectingInternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, MergeRows, Project, WriteDelta}
@@ -20,13 +21,14 @@ import org.apache.spark.sql.catalyst.plans.logical.MergeRows.Keep
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.util.RowDeltaUtils
 import org.lance.spark.LancePositionDeltaOperation
+import org.lance.spark.utils.SparkUtil
 
 import scala.collection.JavaConverters._
 
-case class UpdateColumnsExtractor() extends Rule[LogicalPlan] {
+class UpdateColumnsExtractor(session: SparkSession) extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan transformDown {
-    case wd: WriteDelta =>
+    case wd: WriteDelta if SparkUtil.rewriteColumns(session) =>
       try {
         wd.operation match {
           case op: LancePositionDeltaOperation =>
@@ -52,7 +54,11 @@ case class UpdateColumnsExtractor() extends Rule[LogicalPlan] {
         }
 
       } catch {
-        case _: Exception =>
+        case e: Exception => {
+          throw new RuntimeException(
+            "Error when extract updated columns, please set `" + SparkUtil.REWRITE_COLUMNS + "` to `false` do disable lance's RewriteColumns mode",
+            e)
+        }
       }
 
       wd
@@ -68,9 +74,9 @@ case class UpdateColumnsExtractor() extends Rule[LogicalPlan] {
    * @return Sequence of updated column names
    */
   private def extractMergeRowsUpdatedColumns(
-      mergeRows: MergeRows,
-      targetColOrdinals: Seq[Int],
-      targetAttrs: Seq[Attribute]): Seq[String] = {
+                                              mergeRows: MergeRows,
+                                              targetColOrdinals: Seq[Int],
+                                              targetAttrs: Seq[Attribute]): Seq[String] = {
     val actions =
       mergeRows.matchedInstructions ++ mergeRows.notMatchedInstructions ++ mergeRows.notMatchedBySourceInstructions
 
@@ -106,9 +112,9 @@ case class UpdateColumnsExtractor() extends Rule[LogicalPlan] {
    * @return Sequence of updated column names
    */
   private def extractProjectUpdatedColumns(
-      project: Project,
-      targetColOrdinals: Seq[Int],
-      targetAttrs: Seq[Attribute]): Seq[String] = {
+                                            project: Project,
+                                            targetColOrdinals: Seq[Int],
+                                            targetAttrs: Seq[Attribute]): Seq[String] = {
     val projections = project.projectList
     val operationColIndex = projections.indexWhere(_.name.equals(RowDeltaUtils.OPERATION_COLUMN))
 

@@ -16,6 +16,7 @@ package org.lance.spark.update;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.junit.jupiter.api.BeforeEach;
+import org.lance.spark.utils.SparkUtil;
 
 public class MergeIntoRewriteRowsTest extends BaseMergeIntoTest {
   @BeforeEach
@@ -30,12 +31,14 @@ public class MergeIntoRewriteRowsTest extends BaseMergeIntoTest {
                 "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
             .config("spark.sql.catalog." + catalogName + ".impl", "dir")
             .config("spark.sql.catalog." + catalogName + ".root", tempDir.toString())
-            .config("spark.sql.catalog." + catalogName + ".storage.rewrite_columns", "false")
             .config("spark.sql.shuffle.partitions", String.valueOf(SHUFFLE_PARTITIONS))
             .config("spark.sql.adaptive.enabled", "false")
             .config("spark.default.parallelism", String.valueOf(SHUFFLE_PARTITIONS))
             .config("spark.ui.enabled", "false")
             .getOrCreate();
+
+    // Use RewriteRows mode to do update/merge-into
+    spark.conf().set(SparkUtil.REWRITE_COLUMNS, "false");
 
     catalog = (TableCatalog) spark.sessionState().catalogManager().catalog(catalogName);
   }

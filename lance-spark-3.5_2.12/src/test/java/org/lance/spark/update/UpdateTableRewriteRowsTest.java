@@ -17,6 +17,7 @@ import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.lance.spark.utils.SparkUtil;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -33,13 +34,15 @@ public class UpdateTableRewriteRowsTest extends UpdateTableTest {
             .config(
                 "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
             .config("spark.sql.catalog." + catalogName + ".impl", getNsImpl())
-            .config("spark.sql.catalog." + catalogName + ".rewrite_columns", "false")
             .getOrCreate();
 
     Map<String, String> additionalConfigs = getAdditionalNsConfigs();
     for (Map.Entry<String, String> entry : additionalConfigs.entrySet()) {
       spark.conf().set("spark.sql.catalog." + catalogName + "." + entry.getKey(), entry.getValue());
     }
+
+    // Use RewriteRows mode to do update/merge-into
+    spark.conf().set(SparkUtil.REWRITE_COLUMNS, "false");
 
     catalog = (TableCatalog) spark.sessionState().catalogManager().catalog(catalogName);
   }

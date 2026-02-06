@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.lance.spark.utils.SparkUtil;
 
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -49,13 +50,14 @@ public class UpdateTableTest {
             .config(
                 "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
             .config("spark.sql.catalog." + catalogName + ".impl", getNsImpl())
-            .config("spark.sql.catalog." + catalogName + ".rewrite_columns", "true")
             .getOrCreate();
 
     Map<String, String> additionalConfigs = getAdditionalNsConfigs();
     for (Map.Entry<String, String> entry : additionalConfigs.entrySet()) {
       spark.conf().set("spark.sql.catalog." + catalogName + "." + entry.getKey(), entry.getValue());
     }
+
+    spark.conf().set(SparkUtil.REWRITE_COLUMNS, "true");
 
     catalog = (TableCatalog) spark.sessionState().catalogManager().catalog(catalogName);
   }

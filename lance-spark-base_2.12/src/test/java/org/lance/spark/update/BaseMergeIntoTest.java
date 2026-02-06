@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.lance.spark.utils.SparkUtil;
 
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -51,12 +52,13 @@ public abstract class BaseMergeIntoTest {
                 "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
             .config("spark.sql.catalog." + catalogName + ".impl", "dir")
             .config("spark.sql.catalog." + catalogName + ".root", tempDir.toString())
-            .config("spark.sql.catalog." + catalogName + ".storage.rewrite_columns", "true")
             .config("spark.sql.shuffle.partitions", String.valueOf(SHUFFLE_PARTITIONS))
             .config("spark.sql.adaptive.enabled", "false")
             .config("spark.default.parallelism", String.valueOf(SHUFFLE_PARTITIONS))
             .config("spark.ui.enabled", "false")
             .getOrCreate();
+
+    spark.conf().set(SparkUtil.REWRITE_COLUMNS, "true");
 
     catalog = (TableCatalog) spark.sessionState().catalogManager().catalog(catalogName);
   }

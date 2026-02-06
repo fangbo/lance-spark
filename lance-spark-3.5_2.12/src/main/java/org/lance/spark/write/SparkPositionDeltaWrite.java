@@ -28,6 +28,7 @@ import org.lance.spark.LanceRuntime;
 import org.lance.spark.LanceSparkWriteOptions;
 import org.lance.spark.arrow.LanceArrowWriter;
 import org.lance.spark.function.LanceFragmentIdWithDefaultFunction;
+import org.lance.spark.utils.SparkUtil;
 
 import com.google.common.collect.ImmutableList;
 import org.apache.arrow.c.ArrowArrayStream;
@@ -404,7 +405,9 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
       if (updatedArrowSchema == null) {
         throw new UnsupportedOperationException(
             "Updated columns is empty. Maybe some bugs for updated columns extractor. "
-                + "You can set spark.sql.catalog.lance.storage.rewrite_columns to false to disable this feature.");
+                + "You can set "
+                + SparkUtil.REWRITE_COLUMNS
+                + " to false to disable this feature.");
       }
 
       int fragmentId = metadata.getInt(0);

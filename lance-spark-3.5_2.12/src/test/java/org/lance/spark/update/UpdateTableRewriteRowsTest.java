@@ -13,11 +13,12 @@
  */
 package org.lance.spark.update;
 
+import org.lance.spark.utils.SparkUtil;
+
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.lance.spark.utils.SparkUtil;
 
 import java.util.Arrays;
 import java.util.Map;

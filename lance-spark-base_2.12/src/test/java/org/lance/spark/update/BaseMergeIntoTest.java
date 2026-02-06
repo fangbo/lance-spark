@@ -13,6 +13,8 @@
  */
 package org.lance.spark.update;
 
+import org.lance.spark.utils.SparkUtil;
+
 import org.apache.spark.sql.RowFactory;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -21,7 +23,6 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.lance.spark.utils.SparkUtil;
 
 import java.nio.file.Path;
 import java.util.Arrays;

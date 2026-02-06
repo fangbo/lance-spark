@@ -74,9 +74,9 @@ class UpdateColumnsExtractor(session: SparkSession) extends Rule[LogicalPlan] {
    * @return Sequence of updated column names
    */
   private def extractMergeRowsUpdatedColumns(
-                                              mergeRows: MergeRows,
-                                              targetColOrdinals: Seq[Int],
-                                              targetAttrs: Seq[Attribute]): Seq[String] = {
+      mergeRows: MergeRows,
+      targetColOrdinals: Seq[Int],
+      targetAttrs: Seq[Attribute]): Seq[String] = {
     val actions =
       mergeRows.matchedInstructions ++ mergeRows.notMatchedInstructions ++ mergeRows.notMatchedBySourceInstructions
 
@@ -112,9 +112,9 @@ class UpdateColumnsExtractor(session: SparkSession) extends Rule[LogicalPlan] {
    * @return Sequence of updated column names
    */
   private def extractProjectUpdatedColumns(
-                                            project: Project,
-                                            targetColOrdinals: Seq[Int],
-                                            targetAttrs: Seq[Attribute]): Seq[String] = {
+      project: Project,
+      targetColOrdinals: Seq[Int],
+      targetAttrs: Seq[Attribute]): Seq[String] = {
     val projections = project.projectList
     val operationColIndex = projections.indexWhere(_.name.equals(RowDeltaUtils.OPERATION_COLUMN))
 

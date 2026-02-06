@@ -27,14 +27,20 @@ RUN python3 -m venv /opt/venv && \
 
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Build arguments
+ARG SPARK_DOWNLOAD_VERSION=4.0.0
+ARG SPARK_MAJOR_VERSION=4.0
+ARG SCALA_VERSION=2.13
+
 # Optional env variables
 ENV SPARK_HOME=${SPARK_HOME:-"/opt/spark"}
 ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.7-src.zip:$PYTHONPATH
 
 WORKDIR ${SPARK_HOME}
 
-ENV SPARK_VERSION=3.5.8
-ENV SPARK_MAJOR_VERSION=3.5
+ENV SPARK_VERSION=${SPARK_DOWNLOAD_VERSION}
+ENV SPARK_MAJOR_VERSION=${SPARK_MAJOR_VERSION}
+ENV SCALA_VERSION=${SCALA_VERSION}
 ENV LANCE_SPARK_VERSION=0.1.3-beta.8
 ENV LANCE_NS_VERSION=0.4.5
 
@@ -53,7 +59,7 @@ RUN curl -L https://repo1.maven.org/maven2/com/lancedb/lance-namespace-glue/${LA
  -o /opt/spark/jars/lance-namespace-glue-${LANCE_NS_VERSION}.jar
 
 # For local testing, uncomment the lines below and comment out the Maven downloads above:
-#COPY lance-spark-bundle-${SPARK_MAJOR_VERSION}_2.12-${LANCE_SPARK_VERSION}.jar /opt/spark/jars/
+#COPY lance-spark-bundle-${SPARK_MAJOR_VERSION}_${SCALA_VERSION}-${LANCE_SPARK_VERSION}.jar /opt/spark/jars/
 #COPY lance-namespace-glue-${LANCE_NS_VERSION}.jar /opt/spark/jars/
 
 # Download OpenDAL native libraries for Linux architectures
@@ -81,6 +87,9 @@ RUN mkdir -p /home/lance/warehouse /home/lance/notebooks /home/lance/spark-event
 
 # Copy notebooks if available
 COPY notebooks/ /home/lance/notebooks/
+
+# Copy tests
+COPY tests/ /home/lance/tests/
 
 # Add a notebook command
 RUN echo '#! /bin/sh' >> /bin/notebook \

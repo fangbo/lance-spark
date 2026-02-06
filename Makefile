@@ -20,6 +20,11 @@ MODULE := lance-spark-$(SPARK_VERSION)_$(SCALA_VERSION)
 BUNDLE_MODULE := lance-spark-bundle-$(SPARK_VERSION)_$(SCALA_VERSION)
 BASE_MODULE := lance-spark-base_$(SCALA_VERSION)
 
+# Spark download versions for Docker
+include docker/versions.mk
+SPARK_DOWNLOAD_VERSION := $(SPARK_DOWNLOAD_VERSION_$(SPARK_VERSION))
+PY4J_VERSION := $(PY4J_VERSION_$(SPARK_VERSION))
+
 DOCKER_COMPOSE := $(shell \
 	if docker compose version >/dev/null 2>&1; then \
 		echo "docker compose"; \
@@ -95,9 +100,15 @@ clean:
 
 .PHONY: docker-build
 docker-build:
-	$(MAKE) bundle SPARK_VERSION=3.5 SCALA_VERSION=2.12
-	cp lance-spark-bundle-3.5_2.12/target/lance-spark-bundle-3.5_2.12-*.jar docker/
-	cd docker && docker compose build --no-cache spark-lance
+	@ls $(BUNDLE_MODULE)/target/$(BUNDLE_MODULE)-*.jar >/dev/null 2>&1 || \
+		(echo "Error: Bundle jar not found. Run 'make bundle' first." && exit 1)
+	rm -f docker/lance-spark-bundle-*.jar
+	cp $(BUNDLE_MODULE)/target/$(BUNDLE_MODULE)-*.jar docker/
+	cd docker && $(DOCKER_COMPOSE) build --no-cache \
+		--build-arg SPARK_DOWNLOAD_VERSION=$(SPARK_DOWNLOAD_VERSION) \
+		--build-arg SPARK_MAJOR_VERSION=$(SPARK_VERSION) \
+		--build-arg SCALA_VERSION=$(SCALA_VERSION) \
+		spark-lance
 
 .PHONY: docker-up
 docker-up: check-docker-compose
@@ -110,6 +121,30 @@ docker-shell:
 .PHONY: docker-down
 docker-down: check-docker-compose
 	cd docker && ${DOCKER_COMPOSE} down
+
+.PHONY: docker-build-minimal
+docker-build-minimal:
+	@ls $(BUNDLE_MODULE)/target/$(BUNDLE_MODULE)-*.jar >/dev/null 2>&1 || \
+		(echo "Error: Bundle jar not found. Run 'make bundle' first." && exit 1)
+	rm -f docker/lance-spark-bundle-*.jar
+	cp $(BUNDLE_MODULE)/target/$(BUNDLE_MODULE)-*.jar docker/
+	cd docker && docker build \
+		--build-arg SPARK_DOWNLOAD_VERSION=$(SPARK_DOWNLOAD_VERSION) \
+		--build-arg SPARK_MAJOR_VERSION=$(SPARK_VERSION) \
+		--build-arg SCALA_VERSION=$(SCALA_VERSION) \
+		--build-arg PY4J_VERSION=$(PY4J_VERSION) \
+		-f Dockerfile.minimal \
+		-t spark-lance-minimal:$(SPARK_VERSION)_$(SCALA_VERSION) \
+		.
+
+.PHONY: docker-test
+docker-test:
+	@docker image inspect spark-lance-minimal:$(SPARK_VERSION)_$(SCALA_VERSION) >/dev/null 2>&1 || \
+		(echo "Error: Docker image 'spark-lance-minimal:$(SPARK_VERSION)_$(SCALA_VERSION)' not found. Run 'make docker-build-minimal' first." && exit 1)
+	docker run --rm --hostname spark-lance \
+		-e SPARK_VERSION=$(SPARK_VERSION) \
+		spark-lance-minimal:$(SPARK_VERSION)_$(SCALA_VERSION) \
+		"pytest /home/lance/tests/ -v --timeout=120"
 
 # =============================================================================
 # Documentation
@@ -151,6 +186,7 @@ help:
 	@echo "  docker-up      - Start docker containers"
 	@echo "  docker-shell   - Open shell in spark-lance container"
 	@echo "  docker-down    - Stop docker containers"
+	@echo "  docker-test    - Run integration tests in spark-lance-minimal container"
 	@echo ""
 	@echo "Documentation:"
 	@echo "  serve-docs     - Serve documentation locally"

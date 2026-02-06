@@ -17,6 +17,8 @@
     <properties>
         <scala.version>${scala213.version}</scala.version>
         <scala.compat.version>${scala213.compat.version}</scala.compat.version>
+        <arrow.version>${arrow18.version}</arrow.version>
+        <java.release>${java17.release}</java.release>
     </properties>
 
     <dependencies>

@@ -328,20 +328,20 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
     private final Map<Integer, RoaringBitmap> deletedRows;
 
     // Spark schema for updated columns
-    private final StructType updatedSparkSchema;
+    private Optional<StructType> updatedSparkSchema;
 
     // Data stream arrow schema for updated columns
-    private final Schema updatedArrowSchema;
+    private Optional<Schema> updatedArrowSchema;
 
     // Updated column ordinals in source input row
-    private final int[] updatedColumnOrdinals;
+    private Optional<int[]> updatedColumnOrdinals;
 
-    private final Set<Long> fieldsModified = new HashSet<>();
-    private final Map<Integer, FragmentMetadata> updatedFragments = new HashMap<>();
+    private Optional<Set<Long>> fieldsModified;
+    private Optional<Map<Integer, FragmentMetadata>> updatedFragments;
 
-    private int currentUpdateFragmentId = -1;
-    private VectorSchemaRoot currentUpdateData;
-    private LanceArrowWriter currentUpdateWriter;
+    private Optional<Integer> currentUpdateFragmentId;
+    private Optional<VectorSchemaRoot> currentUpdateData;
+    private Optional<LanceArrowWriter> currentUpdateWriter;
 
     private LanceDeltaWriter(
         StructType sparkSchema,
@@ -368,19 +368,20 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
                 LanceDataset.ROW_ADDRESS_COLUMN.dataType(),
                 LanceDataset.ROW_ADDRESS_COLUMN.isNullable());
 
-        updatedSparkSchema = schema;
-        updatedArrowSchema = LanceArrowUtils.toArrowSchema(updatedSparkSchema, "UTC", false, false);
+        updatedSparkSchema = Optional.of(schema);
+        updatedArrowSchema =
+            Optional.of(LanceArrowUtils.toArrowSchema(schema, "UTC", false, false));
 
         updatedColumnOrdinals =
-            updatedColumns.stream()
-                .map(sparkSchema::fieldIndex)
-                .mapToInt(Integer::intValue)
-                .toArray();
-      } else {
-        updatedSparkSchema = null;
-        updatedArrowSchema = null;
-        updatedColumnOrdinals = null;
+            Optional.of(
+                updatedColumns.stream()
+                    .map(sparkSchema::fieldIndex)
+                    .mapToInt(Integer::intValue)
+                    .toArray());
       }
+      fieldsModified = Optional.of(new HashSet<>());
+      updatedFragments = Optional.of(new HashMap<>());
+      currentUpdateFragmentId = Optional.of(-1);
     }
 
     @Override
@@ -411,43 +412,44 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
       }
 
       int fragmentId = metadata.getInt(0);
-      if (currentUpdateFragmentId != fragmentId) {
+      if (currentUpdateFragmentId.get() != fragmentId) {
 
         // A new fragment is coming, update old fragment columns.
         updateFragmentColumns();
 
         // Initialize a new arrow batch writee for new fragment.
-        currentUpdateFragmentId = fragmentId;
-        currentUpdateData = VectorSchemaRoot.create(updatedArrowSchema, LanceRuntime.allocator());
+        currentUpdateFragmentId = Optional.of(fragmentId);
+        currentUpdateData =
+            Optional.of(
+                VectorSchemaRoot.create(updatedArrowSchema.get(), LanceRuntime.allocator()));
         currentUpdateWriter =
-            org.lance.spark.arrow.LanceArrowWriter$.MODULE$.create(
-                currentUpdateData, updatedSparkSchema);
+            Optional.of(
+                org.lance.spark.arrow.LanceArrowWriter$.MODULE$.create(
+                    currentUpdateData.get(), updatedSparkSchema.get()));
       }
 
       // Copy updated columns from source row to updated data row.
-      for (int i = 0; i < updatedColumnOrdinals.length; i++) {
-        currentUpdateWriter.field(i).write(row, updatedColumnOrdinals[i]);
+      for (int i = 0; i < updatedColumnOrdinals.get().length; i++) {
+        currentUpdateWriter.get().field(i).write(row, updatedColumnOrdinals.get()[i]);
       }
       // Add row address column to updated data row.
-      currentUpdateWriter.field(updatedColumnOrdinals.length).write(id, 0);
+      currentUpdateWriter.get().field(updatedColumnOrdinals.get().length).write(id, 0);
     }
 
     private void updateFragmentColumns() throws IOException {
-      if (currentUpdateFragmentId == -1) {
+      if (currentUpdateFragmentId.get() == -1) {
         return;
       }
 
       LOG.info("Update columns for fragment: {}", currentUpdateFragmentId);
 
-      currentUpdateWriter.finish();
+      currentUpdateWriter.get().finish();
 
       ByteArrayOutputStream out = new ByteArrayOutputStream();
-      try (ArrowStreamWriter writer = new ArrowStreamWriter(currentUpdateData, null, out)) {
+      try (ArrowStreamWriter writer = new ArrowStreamWriter(currentUpdateData.get(), null, out)) {
         writer.start();
         writer.writeBatch();
         writer.end();
-      } catch (IOException e) {
-        throw new RuntimeException("Cannot write schema root", e);
       }
 
       byte[] arrowData = out.toByteArray();
@@ -459,7 +461,7 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
         Data.exportArrayStream(allocator, reader, stream);
 
         // Use Dataset to get the fragment and merge columns
-        Fragment fragment = new Fragment(dataset, currentUpdateFragmentId);
+        Fragment fragment = new Fragment(dataset, currentUpdateFragmentId.get());
         FragmentUpdateResult result =
             fragment.updateColumns(
                 stream,
@@ -467,12 +469,12 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
                 LanceDataset.ROW_ADDRESS_COLUMN.name());
 
         for (long fieldId : result.getFieldsModified()) {
-          fieldsModified.add(fieldId);
+          fieldsModified.get().add(fieldId);
         }
-        updatedFragments.put(currentUpdateFragmentId, result.getUpdatedFragment());
+        updatedFragments.get().put(currentUpdateFragmentId.get(), result.getUpdatedFragment());
       }
 
-      currentUpdateData.close();
+      currentUpdateData.get().close();
     }
 
     @Override
@@ -497,20 +499,22 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
                 dataset.getFragment(fragmentId).deleteRows(ImmutableList.copyOf(rowIndexes));
 
             if (updatedFragment != null) {
-              updatedFragments.compute(
-                  fragmentId,
-                  (k, v) -> {
-                    if (v == null) {
-                      return updatedFragment;
-                    } else {
-                      return new FragmentMetadata(
-                          v.getId(),
-                          v.getFiles(),
-                          v.getPhysicalRows(),
-                          updatedFragment.getDeletionFile(),
-                          v.getRowIdMeta());
-                    }
-                  });
+              updatedFragments
+                  .get()
+                  .compute(
+                      fragmentId,
+                      (k, v) -> {
+                        if (v == null) {
+                          return updatedFragment;
+                        } else {
+                          return new FragmentMetadata(
+                              v.getId(),
+                              v.getFiles(),
+                              v.getPhysicalRows(),
+                              updatedFragment.getDeletionFile(),
+                              v.getRowIdMeta());
+                        }
+                      });
             } else {
               removedFragmentIds.add(Long.valueOf(fragmentId));
             }
@@ -518,8 +522,8 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
 
       return new DeltaWriteTaskCommit(
           removedFragmentIds,
-          new ArrayList<>(updatedFragments.values()),
-          fieldsModified,
+          new ArrayList<>(updatedFragments.get().values()),
+          fieldsModified.get(),
           newFragments);
     }
 

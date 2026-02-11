@@ -27,14 +27,11 @@ import org.apache.spark.sql.connector.write.RowLevelOperation;
 import org.apache.spark.sql.connector.write.SupportsDelta;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
 
 public class LancePositionDeltaOperation implements RowLevelOperation, SupportsDelta {
-  private static final Logger LOG = LoggerFactory.getLogger(LancePositionDeltaOperation.class);
 
   private final Command command;
   private final StructType sparkSchema;
@@ -117,7 +114,6 @@ public class LancePositionDeltaOperation implements RowLevelOperation, SupportsD
   }
 
   public void setUpdatedColumns(List<String> updatedColumns) {
-    LOG.info("Set updated columns: {}", updatedColumns);
     this.updatedColumns = updatedColumns;
   }
 }

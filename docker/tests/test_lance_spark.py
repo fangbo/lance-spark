@@ -6,7 +6,7 @@ These tests run inside the Docker container against a real Spark + MinIO environ
 Test organization follows the Lance documentation structure:
 - DDL (Data Definition Language): Namespace, Table, Index, Optimize, Vacuum operations
 - DQL (Data Query Language): SELECT queries and data retrieval
-- DML (Data Manipulation Language): INSERT, UPDATE, DELETE, MERGE, ADD COLUMN operations
+- DML (Data Manipulation Language): INSERT, UPDATE, DELETE, MERGE, ADD COLUMN, UPDATE COLUMN operations
 """
 
 import os
@@ -1197,6 +1197,412 @@ class TestDMLAddColumn:
         assert result[0].total_compensation == 55000   # 50000 + 5000
         assert result[1].total_compensation == 69000   # 60000 + 9000
         assert result[2].total_compensation == 84000   # 70000 + 14000
+
+
+class TestDMLUpdateColumn:
+    """Test DML UPDATE COLUMNS FROM operations for updating existing columns via backfill."""
+
+    def test_update_single_column(self, spark):
+        """Test ALTER TABLE UPDATE COLUMNS FROM with a single column."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 100),
+            (2, 'Bob', 200),
+            (3, 'Charlie', 300)
+        """)
+
+        # Create temp view that updates value for id=2 only
+        spark.sql("""
+            CREATE TEMPORARY VIEW tmp_view AS
+            SELECT _rowaddr, _fragid, 999 as value
+            FROM default.test_table
+            WHERE id = 2
+        """)
+
+        spark.sql("""
+            ALTER TABLE default.test_table UPDATE COLUMNS value FROM tmp_view
+        """)
+
+        result = spark.sql("""
+            SELECT id, name, value
+            FROM default.test_table
+            ORDER BY id
+        """).collect()
+
+        assert len(result) == 3
+        assert result[0].id == 1 and result[0].value == 100  # unchanged
+        assert result[1].id == 2 and result[1].value == 999  # updated
+        assert result[2].id == 3 and result[2].value == 300  # unchanged
+
+    def test_update_multiple_columns(self, spark):
+        """Test ALTER TABLE UPDATE COLUMNS FROM with multiple columns."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 100),
+            (2, 'Bob', 200),
+            (3, 'Charlie', 300)
+        """)
+
+        # Update both name and value for id=2
+        spark.sql("""
+            CREATE TEMPORARY VIEW tmp_view AS
+            SELECT _rowaddr, _fragid, 'Bob_Updated' as name, 999 as value
+            FROM default.test_table
+            WHERE id = 2
+        """)
+
+        spark.sql("""
+            ALTER TABLE default.test_table UPDATE COLUMNS name, value FROM tmp_view
+        """)
+
+        result = spark.sql("""
+            SELECT id, name, value
+            FROM default.test_table
+            ORDER BY id
+        """).collect()
+
+        assert len(result) == 3
+        assert result[1].id == 2
+        assert result[1].name == "Bob_Updated"
+        assert result[1].value == 999
+
+    def test_update_multiple_rows(self, spark):
+        """Test ALTER TABLE UPDATE COLUMNS FROM affecting multiple rows."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 100),
+            (2, 'Bob', 200),
+            (3, 'Charlie', 300)
+        """)
+
+        # Update value for id=1 and id=3
+        spark.sql("""
+            CREATE TEMPORARY VIEW tmp_view AS
+            SELECT _rowaddr, _fragid, value * 10 as value
+            FROM default.test_table
+            WHERE id IN (1, 3)
+        """)
+
+        spark.sql("""
+            ALTER TABLE default.test_table UPDATE COLUMNS value FROM tmp_view
+        """)
+
+        result = spark.sql("""
+            SELECT id, name, value
+            FROM default.test_table
+            ORDER BY id
+        """).collect()
+
+        assert len(result) == 3
+        assert result[0].value == 1000   # 100 * 10
+        assert result[1].value == 200    # unchanged
+        assert result[2].value == 3000   # 300 * 10
+
+    def test_update_computed_values(self, spark):
+        """Test UPDATE COLUMNS FROM with computed/derived values."""
+        spark.sql("""
+            CREATE TABLE default.employees (
+                id INT,
+                name STRING,
+                salary INT,
+                bonus INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.employees VALUES
+            (1, 'Alice', 50000, 5000),
+            (2, 'Bob', 60000, 6000),
+            (3, 'Charlie', 70000, 7000)
+        """)
+
+        # Recompute bonus as 15% of salary for all employees
+        spark.sql("""
+            CREATE TEMPORARY VIEW tmp_view AS
+            SELECT _rowaddr, _fragid, CAST(salary * 0.15 AS INT) as bonus
+            FROM default.employees
+        """)
+
+        spark.sql("""
+            ALTER TABLE default.employees UPDATE COLUMNS bonus FROM tmp_view
+        """)
+
+        result = spark.sql("""
+            SELECT id, salary, bonus
+            FROM default.employees
+            ORDER BY id
+        """).collect()
+
+        assert len(result) == 3
+        assert result[0].bonus == 7500   # 50000 * 0.15
+        assert result[1].bonus == 9000   # 60000 * 0.15
+        assert result[2].bonus == 10500  # 70000 * 0.15
+
+
+class TestDMLInsertOverwrite:
+    """Test INSERT OVERWRITE operations."""
+
+    def test_insert_overwrite_values(self, spark):
+        """Test INSERT OVERWRITE with VALUES clause replaces all data."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        # Insert initial data
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 10),
+            (2, 'Bob', 20),
+            (3, 'Charlie', 30)
+        """)
+        assert spark.table("default.test_table").count() == 3
+
+        # Overwrite with new data
+        spark.sql("""
+            INSERT OVERWRITE default.test_table VALUES
+            (100, 'NewUser1', 1000),
+            (200, 'NewUser2', 2000)
+        """)
+
+        result = spark.table("default.test_table").orderBy("id").collect()
+        assert len(result) == 2
+        assert result[0].id == 100
+        assert result[1].id == 200
+
+    def test_insert_overwrite_from_select(self, spark):
+        """Test INSERT OVERWRITE from a SELECT query."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 10),
+            (2, 'Bob', 20),
+            (3, 'Charlie', 30)
+        """)
+
+        # Create source view with transformed data
+        source_data = [(10, "Transformed1", 100), (20, "Transformed2", 200)]
+        source_df = spark.createDataFrame(source_data, ["id", "name", "value"])
+        source_df.createOrReplaceTempView("source")
+
+        spark.sql("""
+            INSERT OVERWRITE default.test_table
+            SELECT * FROM source
+        """)
+
+        result = spark.table("default.test_table").orderBy("id").collect()
+        assert len(result) == 2
+        assert result[0].name == "Transformed1"
+        assert result[1].name == "Transformed2"
+
+
+class TestDQLTimeTravel:
+    """Test time travel queries using VERSION AS OF."""
+
+    def test_version_as_of(self, spark):
+        """Test SELECT with VERSION AS OF to query historical data."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING
+            )
+        """)
+
+        # Version 2: first insert
+        spark.sql("INSERT INTO default.test_table VALUES (1, 'v1')")
+        # Version 3: second insert
+        spark.sql("INSERT INTO default.test_table VALUES (2, 'v2')")
+
+        # Current version should have 2 rows
+        assert spark.table("default.test_table").count() == 2
+
+        # Version 2 (after first insert) should have 1 row
+        result = spark.sql("""
+            SELECT * FROM default.test_table VERSION AS OF 2
+        """).collect()
+        assert len(result) == 1
+        assert result[0].id == 1
+
+    @requires_update_or_merge
+    def test_version_as_of_after_update(self, spark):
+        """Test VERSION AS OF returns data before an update."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 100),
+            (2, 'Bob', 200)
+        """)
+
+        # Update a row (creates a new version)
+        spark.sql("UPDATE default.test_table SET value = 999 WHERE id = 1")
+
+        # Current version should show the updated value
+        current = spark.sql("SELECT value FROM default.test_table WHERE id = 1").collect()
+        assert current[0].value == 999
+
+        # Version 2 (before update) should show the original value
+        historical = spark.sql("""
+            SELECT value FROM default.test_table VERSION AS OF 2 WHERE id = 1
+        """).collect()
+        assert historical[0].value == 100
+
+    def test_version_as_of_after_delete(self, spark):
+        """Test VERSION AS OF returns data that was subsequently deleted."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice'),
+            (2, 'Bob'),
+            (3, 'Charlie')
+        """)
+
+        # Delete a row
+        spark.sql("DELETE FROM default.test_table WHERE id = 2")
+
+        # Current version should have 2 rows
+        assert spark.table("default.test_table").count() == 2
+
+        # Version 2 (before delete) should have 3 rows
+        result = spark.sql("""
+            SELECT * FROM default.test_table VERSION AS OF 2
+        """).collect()
+        assert len(result) == 3
+
+
+@requires_update_or_merge
+class TestDMLMergeDelete:
+    """Test MERGE INTO with WHEN MATCHED THEN DELETE."""
+
+    def test_merge_with_delete(self, spark):
+        """Test MERGE INTO with WHEN MATCHED THEN DELETE clause."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 10),
+            (2, 'Bob', 20),
+            (3, 'Charlie', 30),
+            (4, 'Diana', 40)
+        """)
+
+        # Source contains IDs to delete
+        source_data = [(2, "Bob", 20), (4, "Diana", 40)]
+        source_df = spark.createDataFrame(source_data, ["id", "name", "value"])
+        source_df.createOrReplaceTempView("source")
+
+        spark.sql("""
+            MERGE INTO default.test_table t
+            USING source s
+            ON t.id = s.id
+            WHEN MATCHED THEN DELETE
+        """)
+
+        result = spark.table("default.test_table").orderBy("id").collect()
+        assert len(result) == 2
+        assert result[0].id == 1
+        assert result[1].id == 3
+
+    def test_merge_with_all_clauses(self, spark):
+        """Test MERGE INTO with UPDATE, DELETE, and INSERT clauses together."""
+        spark.sql("""
+            CREATE TABLE default.test_table (
+                id INT,
+                name STRING,
+                value INT
+            )
+        """)
+
+        spark.sql("""
+            INSERT INTO default.test_table VALUES
+            (1, 'Alice', 10),
+            (2, 'Bob', 20),
+            (3, 'Charlie', 30)
+        """)
+
+        # Source: id=1 gets updated, id=2 gets deleted (value=0), id=5 gets inserted
+        source_data = [(1, "Alice_Updated", 100), (2, "Bob", 0), (5, "Eve", 50)]
+        source_df = spark.createDataFrame(source_data, ["id", "name", "value"])
+        source_df.createOrReplaceTempView("source")
+
+        spark.sql("""
+            MERGE INTO default.test_table t
+            USING source s
+            ON t.id = s.id
+            WHEN MATCHED AND s.value = 0 THEN DELETE
+            WHEN MATCHED THEN UPDATE SET name = s.name, value = s.value
+            WHEN NOT MATCHED THEN INSERT (id, name, value) VALUES (s.id, s.name, s.value)
+        """)
+
+        result = spark.table("default.test_table").orderBy("id").collect()
+        assert len(result) == 3
+
+        # id=1 updated
+        assert result[0].id == 1
+        assert result[0].name == "Alice_Updated"
+        assert result[0].value == 100
+
+        # id=2 deleted, id=3 unchanged
+        assert result[1].id == 3
+        assert result[1].name == "Charlie"
+        assert result[1].value == 30
+
+        # id=5 inserted
+        assert result[2].id == 5
+        assert result[2].name == "Eve"
+        assert result[2].value == 50
 
 
 if __name__ == "__main__":

@@ -64,6 +64,9 @@ public class LanceFragmentScanner implements AutoCloseable {
                   if (provider != null) {
                     builder.setStorageOptionsProvider(provider);
                   }
+                  if (readOptions.getVersion() != null) {
+                    builder.setVersion(readOptions.getVersion());
+                  }
 
                   Dataset dataset =
                       Dataset.open()

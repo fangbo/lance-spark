@@ -61,6 +61,7 @@ import java.util.stream.Stream;
 
 import static org.lance.spark.utils.Utils.createReadOptions;
 import static org.lance.spark.utils.Utils.getSchema;
+import static org.lance.spark.utils.Utils.openDataset;
 
 public abstract class BaseLanceNamespaceSparkCatalog
     implements TableCatalog, SupportsNamespaces, FunctionCatalog {
@@ -662,19 +663,14 @@ public abstract class BaseLanceNamespaceSparkCatalog
 
     Optional<Long> versionId = Optional.empty();
     if (timestamp.isPresent()) {
-      try (Dataset dataset =
-          Dataset.open()
-              .allocator(LanceRuntime.allocator())
-              .uri(location)
-              .readOptions(
-                  createReadOptions(
-                          location,
-                          catalogConfig,
-                          Optional.empty(),
-                          Optional.of(namespace),
-                          Optional.of(tableId))
-                      .toReadOptions())
-              .build()) {
+      LanceSparkReadOptions readOptions =
+          createReadOptions(
+              location,
+              catalogConfig,
+              Optional.empty(),
+              Optional.of(namespace),
+              Optional.of(tableId));
+      try (Dataset dataset = openDataset(readOptions)) {
         versionId = Optional.of(Utils.findVersion(dataset.listVersions(), timestamp.get()));
       } catch (TableNotFoundException e) {
         throw new NoSuchTableException(ident);
@@ -686,7 +682,7 @@ public abstract class BaseLanceNamespaceSparkCatalog
     LanceSparkReadOptions readOptions =
         createReadOptions(
             location, catalogConfig, versionId, Optional.of(namespace), Optional.of(tableId));
-    StructType schema = getSchema(ident, location, readOptions, namespace);
+    StructType schema = getSchema(ident, readOptions);
 
     // Create read options with namespace support
     return createDataset(

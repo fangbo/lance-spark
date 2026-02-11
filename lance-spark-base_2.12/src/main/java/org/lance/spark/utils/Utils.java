@@ -14,7 +14,6 @@
 package org.lance.spark.utils;
 
 import org.lance.Dataset;
-import org.lance.OpenDatasetBuilder;
 import org.lance.Version;
 import org.lance.namespace.LanceNamespace;
 import org.lance.spark.LanceRuntime;
@@ -55,30 +54,29 @@ public class Utils {
     return versionID;
   }
 
-  public static StructType getSchema(
-      Identifier ident,
-      String datasetUri,
-      LanceSparkReadOptions readOptions,
-      LanceNamespace namespace)
+  public static Dataset openDataset(LanceSparkReadOptions readOptions) {
+    if (readOptions.hasNamespace()) {
+      return Dataset.open()
+          .allocator(LanceRuntime.allocator())
+          .namespace(readOptions.getNamespace())
+          .tableId(readOptions.getTableId())
+          .readOptions(readOptions.toReadOptions())
+          .build();
+    } else {
+      return Dataset.open()
+          .allocator(LanceRuntime.allocator())
+          .uri(readOptions.getDatasetUri())
+          .readOptions(readOptions.toReadOptions())
+          .build();
+    }
+  }
+
+  public static StructType getSchema(Identifier ident, LanceSparkReadOptions readOptions)
       throws NoSuchTableException {
-    Dataset dataset = null;
-    try {
-      OpenDatasetBuilder builder =
-          Dataset.open()
-              .allocator(LanceRuntime.allocator())
-              .uri(datasetUri)
-              .readOptions(readOptions.toReadOptions());
-      if (namespace != null) {
-        builder.namespace(namespace);
-      }
-      dataset = builder.build();
+    try (Dataset dataset = openDataset(readOptions)) {
       return LanceArrowUtils.fromArrowSchema(dataset.getSchema());
     } catch (IllegalArgumentException e) {
       throw new NoSuchTableException(ident);
-    } finally {
-      if (dataset != null) {
-        dataset.close();
-      }
     }
   }
 

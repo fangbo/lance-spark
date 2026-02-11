@@ -34,6 +34,7 @@ import java.util.Map;
 
 import static org.lance.spark.utils.Utils.createReadOptions;
 import static org.lance.spark.utils.Utils.getSchema;
+import static org.lance.spark.utils.Utils.openDataset;
 
 /**
  * A simple Lance catalog that supports both path-based and catalog-based table access.
@@ -171,19 +172,10 @@ public class LanceCatalog implements TableCatalog {
     if (version.isPresent()) {
       versionId = Optional.of(Utils.parseVersion(version.get()));
     } else if (timestamp.isPresent()) {
-      try (Dataset dataset =
-          Dataset.open()
-              .allocator(LanceRuntime.allocator())
-              .uri(datasetUri)
-              .readOptions(
-                  createReadOptions(
-                          datasetUri,
-                          catalogConfig,
-                          Optional.empty(),
-                          Optional.empty(),
-                          Optional.empty())
-                      .toReadOptions())
-              .build()) {
+      LanceSparkReadOptions readOptions =
+          createReadOptions(
+              datasetUri, catalogConfig, Optional.empty(), Optional.empty(), Optional.empty());
+      try (Dataset dataset = openDataset(readOptions)) {
         versionId = Optional.of(Utils.findVersion(dataset.listVersions(), timestamp.get()));
       } catch (IllegalArgumentException e) {
         throw new NoSuchTableException(ident);
@@ -192,7 +184,7 @@ public class LanceCatalog implements TableCatalog {
 
     LanceSparkReadOptions readOptions =
         createReadOptions(datasetUri, catalogConfig, versionId, Optional.empty(), Optional.empty());
-    StructType schema = getSchema(ident, datasetUri, readOptions, null);
+    StructType schema = getSchema(ident, readOptions);
 
     return new LanceDataset(readOptions, schema, null, null, null);
   }

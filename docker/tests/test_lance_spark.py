@@ -1,7 +1,10 @@
 """
 Automated integration tests for Lance-Spark.
 
-These tests run inside the Docker container against a real Spark + MinIO environment.
+These tests run inside the Docker container against a real Spark environment.
+The ``spark`` fixture (defined in conftest.py) is parameterized over storage
+backends (local filesystem, Azurite, MinIO) so that every test is automatically
+exercised against all three.
 
 Test organization follows the Lance documentation structure:
 - DDL (Data Definition Language): Namespace, Table, Index, Optimize, Vacuum operations
@@ -13,7 +16,6 @@ import os
 import time
 import pytest
 from packaging.version import Version
-from pyspark.sql import SparkSession
 
 SPARK_VERSION = Version(os.environ.get("SPARK_VERSION", "3.5"))
 
@@ -22,43 +24,6 @@ requires_update_or_merge = pytest.mark.skipif(
     SPARK_VERSION < Version("3.5"),
     reason="UPDATE/MERGE require Spark 3.5+ (row-level rewrite rules not available in 3.4)"
 )
-
-
-@pytest.fixture(scope="module")
-def spark():
-    """Create a Spark session configured with Lance catalog."""
-    session = (
-        SparkSession.builder
-        .appName("LanceSparkTests")
-        .config("spark.sql.catalog.lance", "org.lance.spark.LanceNamespaceSparkCatalog")
-        .config("spark.sql.catalog.lance.impl", "dir")
-        .config("spark.sql.catalog.lance.root", "/home/lance/data")
-        .config("spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
-        .getOrCreate()
-    )
-    session.sql("SET spark.sql.defaultCatalog=lance")
-    yield session
-    session.stop()
-
-
-@pytest.fixture(autouse=True)
-def cleanup_tables(spark):
-    """Clean up test tables before and after each test."""
-    spark.sql("DROP TABLE IF EXISTS default.test_table PURGE")
-    spark.sql("DROP TABLE IF EXISTS default.employees PURGE")
-    # TODO - reenable once `tableExists` works on Spark 4.0
-    #spark.catalog.dropTempView("source") if spark.catalog.tableExists("source") else None
-    #spark.catalog.dropTempView("tmp_view") if spark.catalog.tableExists("tmp_view") else None
-    spark.catalog.dropTempView("source")
-    spark.catalog.dropTempView("tmp_view")
-    yield
-    spark.sql("DROP TABLE IF EXISTS default.test_table PURGE")
-    spark.sql("DROP TABLE IF EXISTS default.employees PURGE")
-    # TODO - reenable once `tableExists` works on Spark 4.0
-    #spark.catalog.dropTempView("source") if spark.catalog.tableExists("source") else None
-    #spark.catalog.dropTempView("tmp_view") if spark.catalog.tableExists("tmp_view") else None
-    spark.catalog.dropTempView("source")
-    spark.catalog.dropTempView("tmp_view")
 
 
 # =============================================================================

@@ -86,7 +86,7 @@ def azurite():
     }
 
     proc.terminate()
-    proc.wait(timeout=5)
+    proc.wait(timeout=10)
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ def minio():
     }
 
     proc.terminate()
-    proc.wait(timeout=5)
+    proc.wait(timeout=10)
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +225,26 @@ def spark(request):
     session.sql("CREATE NAMESPACE IF NOT EXISTS default")
     yield session
     session.stop()
+
+
+@pytest.fixture
+def test_table(request, spark):
+    """Provide a unique table name for each test to avoid isolation issues.
+
+    Usage: def test_foo(spark, test_table):
+               spark.sql(f"CREATE TABLE {test_table} ...")
+    """
+    # Create unique table name from test name (sanitize special chars)
+    test_name = request.node.name.replace("[", "_").replace("]", "_").replace("-", "_")
+    table_name = f"default.test_{test_name}"
+
+    # Cleanup before test
+    spark.sql(f"DROP TABLE IF EXISTS {table_name} PURGE")
+
+    yield table_name
+
+    # Cleanup after test
+    spark.sql(f"DROP TABLE IF EXISTS {table_name} PURGE")
 
 
 @pytest.fixture(autouse=True)

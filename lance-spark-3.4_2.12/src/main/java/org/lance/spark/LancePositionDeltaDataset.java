@@ -13,6 +13,8 @@
  */
 package org.lance.spark;
 
+import org.lance.spark.write.StagedCommit;
+
 import org.apache.spark.sql.connector.catalog.SupportsRowLevelOperations;
 import org.apache.spark.sql.connector.write.RowLevelOperationBuilder;
 import org.apache.spark.sql.connector.write.RowLevelOperationInfo;
@@ -28,6 +30,22 @@ public class LancePositionDeltaDataset extends LanceDataset implements SupportsR
       String namespaceImpl,
       Map<String, String> namespaceProperties) {
     super(readOptions, sparkSchema, initialStorageOptions, namespaceImpl, namespaceProperties);
+  }
+
+  public LancePositionDeltaDataset(
+      LanceSparkReadOptions readOptions,
+      StructType sparkSchema,
+      Map<String, String> initialStorageOptions,
+      String namespaceImpl,
+      Map<String, String> namespaceProperties,
+      StagedCommit stagedCommit) {
+    super(
+        readOptions,
+        sparkSchema,
+        initialStorageOptions,
+        namespaceImpl,
+        namespaceProperties,
+        stagedCommit);
   }
 
   @Override

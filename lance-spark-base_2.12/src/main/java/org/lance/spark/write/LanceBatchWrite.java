@@ -34,6 +34,7 @@ import org.apache.spark.sql.util.LanceArrowUtils;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class LanceBatchWrite implements BatchWrite {
@@ -53,8 +54,13 @@ public class LanceBatchWrite implements BatchWrite {
   private final Map<String, String> namespaceProperties;
   private final List<String> tableId;
 
-  /** Dataset opened at start, held for commit to ensure version consistency. */
-  private final Dataset dataset;
+  /**
+   * Dataset opened at start for existing tables to ensure version consistency. Empty for staged
+   * operations (the dataset is managed by StagedCommit).
+   */
+  private final Optional<Dataset> dataset;
+
+  private final StagedCommit stagedCommit;
 
   public LanceBatchWrite(
       StructType schema,
@@ -63,7 +69,8 @@ public class LanceBatchWrite implements BatchWrite {
       Map<String, String> initialStorageOptions,
       String namespaceImpl,
       Map<String, String> namespaceProperties,
-      List<String> tableId) {
+      List<String> tableId,
+      StagedCommit stagedCommit) {
     this.schema = schema;
     this.writeOptions = writeOptions;
     this.overwrite = overwrite;
@@ -71,9 +78,11 @@ public class LanceBatchWrite implements BatchWrite {
     this.namespaceImpl = namespaceImpl;
     this.namespaceProperties = namespaceProperties;
     this.tableId = tableId;
+    this.stagedCommit = stagedCommit;
 
-    // Open dataset at start to capture version for commit
-    this.dataset = openDataset();
+    // For staged operations, the dataset is managed by StagedCommit.
+    // For non-staged operations, open to capture version for commit.
+    this.dataset = (stagedCommit != null) ? Optional.empty() : Optional.of(openDataset());
   }
 
   private Dataset openDataset() {
@@ -101,8 +110,18 @@ public class LanceBatchWrite implements BatchWrite {
 
   @Override
   public DataWriterFactory createBatchWriterFactory(PhysicalWriteInfo info) {
+    // For staged operations (REPLACE TABLE, CREATE OR REPLACE), pass a flag so that
+    // Fragment.create() uses the stream's schema instead of validating against the existing
+    // dataset schema.
+    boolean isStagedOperation = (stagedCommit != null);
     return new LanceDataWriter.WriterFactory(
-        schema, writeOptions, initialStorageOptions, namespaceImpl, namespaceProperties, tableId);
+        schema,
+        writeOptions,
+        initialStorageOptions,
+        namespaceImpl,
+        namespaceProperties,
+        tableId,
+        isStagedOperation);
   }
 
   @Override
@@ -112,32 +131,45 @@ public class LanceBatchWrite implements BatchWrite {
 
   @Override
   public void commit(WriterCommitMessage[] messages) {
-    try {
-      List<FragmentMetadata> fragments =
-          Arrays.stream(messages)
-              .map(m -> (TaskCommit) m)
-              .map(TaskCommit::getFragments)
-              .flatMap(List::stream)
-              .collect(Collectors.toList());
+    List<FragmentMetadata> fragments =
+        Arrays.stream(messages)
+            .map(m -> (TaskCommit) m)
+            .map(TaskCommit::getFragments)
+            .flatMap(List::stream)
+            .collect(Collectors.toList());
 
-      Operation operation;
-      if (overwrite || writeOptions.isOverwrite()) {
-        Schema arrowSchema = LanceArrowUtils.toArrowSchema(schema, "UTC", true, false);
-        operation = Overwrite.builder().fragments(fragments).schema(arrowSchema).build();
-      } else {
-        operation = Append.builder().fragments(fragments).build();
+    Schema arrowSchema = LanceArrowUtils.toArrowSchema(schema, "UTC", true, false);
+    boolean isOverwrite = overwrite || writeOptions.isOverwrite();
+
+    if (stagedCommit != null) {
+      // For staged tables, update the eagerly-created StagedCommit with fragments and schema.
+      // commitStagedChanges() will perform the actual commit.
+      stagedCommit.setFragments(fragments);
+      stagedCommit.setSchema(arrowSchema);
+    } else {
+      // For non-staged tables, commit immediately
+      Dataset ds = dataset.get();
+      try {
+        Operation operation;
+        if (isOverwrite) {
+          operation = Overwrite.builder().fragments(fragments).schema(arrowSchema).build();
+        } else {
+          operation = Append.builder().fragments(fragments).build();
+        }
+        ds.newTransactionBuilder().operation(operation).build().commit();
+      } finally {
+        ds.close();
       }
-
-      // Commit using the dataset opened at start (ensures version consistency)
-      dataset.newTransactionBuilder().operation(operation).build().commit();
-    } finally {
-      dataset.close();
     }
   }
 
   @Override
   public void abort(WriterCommitMessage[] messages) {
-    dataset.close();
+    // For staged tables, the dataset is managed by StagedCommit (via abortStagedChanges)
+    // For non-staged tables, close it here
+    if (stagedCommit == null) {
+      dataset.ifPresent(Dataset::close);
+    }
   }
 
   @Override

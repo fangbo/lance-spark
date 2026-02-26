@@ -103,8 +103,6 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: "maven"
-      - name: Install base
-        run: make install-base SCALA_VERSION=${{ matrix.scala-version }}
       - name: Run tests
         run: make test SPARK_VERSION=${{ matrix.spark-version }} SCALA_VERSION=${{ matrix.scala-version }}
 

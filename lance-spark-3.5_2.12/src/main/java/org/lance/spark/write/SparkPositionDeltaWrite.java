@@ -373,8 +373,7 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
                 LanceDataset.ROW_ADDRESS_COLUMN.isNullable());
 
         updatedSparkSchema = Optional.of(schema);
-        updatedArrowSchema =
-            Optional.of(LanceArrowUtils.toArrowSchema(schema, "UTC", false));
+        updatedArrowSchema = Optional.of(LanceArrowUtils.toArrowSchema(schema, "UTC", false));
 
         updatedColumnOrdinals =
             Optional.of(

@@ -310,6 +310,10 @@ public class LanceDataset
 
     if (stagedCommit != null) {
       builder.setStagedCommit(stagedCommit);
+      // Set write mode to OVERWRITE so that Fragment.create() infers schema from the
+      // arrow stream rather than validating against the existing dataset schema. This
+      // allows replacing a table with a different schema.
+      builder.truncate();
     }
     return builder;
   }

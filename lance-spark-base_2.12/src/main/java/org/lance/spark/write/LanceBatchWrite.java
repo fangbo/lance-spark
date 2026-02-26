@@ -113,18 +113,8 @@ public class LanceBatchWrite implements BatchWrite {
 
   @Override
   public DataWriterFactory createBatchWriterFactory(PhysicalWriteInfo info) {
-    // For staged operations (REPLACE TABLE, CREATE OR REPLACE), pass a flag so that
-    // Fragment.create() uses the stream's schema instead of validating against the existing
-    // dataset schema.
-    boolean isStagedOperation = (stagedCommit != null);
     return new LanceDataWriter.WriterFactory(
-        schema,
-        writeOptions,
-        initialStorageOptions,
-        namespaceImpl,
-        namespaceProperties,
-        tableId,
-        isStagedOperation);
+        schema, writeOptions, initialStorageOptions, namespaceImpl, namespaceProperties, tableId);
   }
 
   @Override

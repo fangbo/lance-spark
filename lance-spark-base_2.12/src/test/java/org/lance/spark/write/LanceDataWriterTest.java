@@ -58,8 +58,7 @@ public class LanceDataWriterTest {
               null, // initialStorageOptions
               null, // namespaceImpl
               null, // namespaceProperties
-              null, // tableId
-              false); // isStagedOperation
+              null); // tableId
       LanceDataWriter dataWriter = (LanceDataWriter) writerFactory.createWriter(0, 0);
 
       int rows = 132;

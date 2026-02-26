@@ -480,17 +480,17 @@ public abstract class BaseSparkConnectorWriteTest {
     assertTrue(checkDataset(3, outputPath));
 
     // check timestamp as of
-    DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    DateTimeFormatter format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
     String date = version_3.getDataTime().format(format);
     String sql = String.format("select * from lance.`%s`  TIMESTAMP AS OF '%s'", outputPath, date);
 
     List<Row> res = spark.sql(sql).collectAsList();
-    assertEquals(1, res.size());
+    assertEquals(2, res.size());
 
     // check version as of
     List<Row> res2 =
         spark.sql("select * from lance.`" + outputPath + "`  VERSION AS OF " + 2).collectAsList();
-    assertEquals(1, res2.size());
+    assertEquals(2, res2.size());
   }
 
   private boolean checkDataset(int expectedSize, String path) {

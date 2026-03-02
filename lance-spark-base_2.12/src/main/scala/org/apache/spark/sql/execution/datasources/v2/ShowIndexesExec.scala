@@ -27,9 +27,7 @@ import scala.jdk.CollectionConverters._
 /**
  * Physical execution of SHOW INDEXES for Lance datasets.
  *
- * This command lists all indexes defined on the underlying Lance table,
- * returning one row per index with metadata aligned to org.lance.index.IndexDescription
- * (excluding the metadata field).
+ * This command lists all indexes defined on the underlying Lance table.
  */
 case class ShowIndexesExec(
     catalog: TableCatalog,

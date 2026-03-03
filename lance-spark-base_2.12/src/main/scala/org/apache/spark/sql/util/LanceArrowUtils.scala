@@ -91,6 +91,9 @@ object LanceArrowUtils {
       case _: ArrowType.LargeBinary =>
         // LargeBinary maps back to BinaryType in Spark
         BinaryType
+      case _: ArrowType.FixedSizeBinary =>
+        // FixedSizeBinary maps to BinaryType in Spark
+        BinaryType
       case l: ArrowType.List =>
         val children = field.getChildren
         if (children.isEmpty) {

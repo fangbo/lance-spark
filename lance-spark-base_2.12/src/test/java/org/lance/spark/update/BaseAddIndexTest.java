@@ -324,6 +324,58 @@ public abstract class BaseAddIndexTest {
     checkIndex("test_fts_repeat");
   }
 
+  @Test
+  public void testDropIndex() {
+    prepareDataset();
+
+    // Create an index first
+    spark.sql(
+        String.format(
+            "alter table %s create index test_drop_index using btree (id)", fullTable));
+
+    // Ensure index exists
+    checkIndex("test_drop_index");
+
+    Dataset<Row> result =
+        spark.sql(
+            String.format("alter table %s drop index test_drop_index", fullTable));
+
+    Assertions.assertEquals(
+        "StructType(StructField(index_name,StringType,true),StructField(dropped,BooleanType,true))",
+        result.schema().toString());
+
+    Row row = result.collectAsList().get(0);
+    String indexName = row.getString(0);
+    boolean dropped = row.getBoolean(1);
+
+    Assertions.assertEquals("test_drop_index", indexName);
+    Assertions.assertTrue(dropped, "Expected index to be reported as dropped");
+
+    // Verify index is removed
+    org.lance.Dataset lanceDataset = org.lance.Dataset.open().uri(tableDir).build();
+    try {
+      List<Index> indexList = lanceDataset.getIndexes();
+      Set<String> indexNames =
+          indexList.stream().map(Index::name).collect(Collectors.toSet());
+      Assertions.assertFalse(indexNames.contains("test_drop_index"));
+    } finally {
+      lanceDataset.close();
+    }
+  }
+
+  @Test
+  public void testDropNonExistentIndex() {
+    prepareDataset();
+
+    Assertions.assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            spark.sql(
+                String.format(
+                    "alter table %s drop index non_existing_index", fullTable)),
+        "Expected dropping a non-existent index to throw IllegalArgumentException");
+  }
+
   private void checkIndex(String indexName) {
     // Check index is created successfully
     org.lance.Dataset lanceDataset = org.lance.Dataset.open().uri(tableDir).build();

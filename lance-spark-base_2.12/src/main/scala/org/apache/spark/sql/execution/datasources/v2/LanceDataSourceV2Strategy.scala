@@ -45,6 +45,9 @@ case class LanceDataSourceV2Strategy(session: SparkSession) extends SparkStrateg
         columns,
         args) :: Nil
 
+    case DropIndex(ResolvedIdentifier(catalog, ident), indexName) =>
+      DropIndexExec(asTableCatalog(catalog), ident, indexName) :: Nil
+
     case ShowIndexes(ResolvedIdentifier(catalog, ident)) =>
       ShowIndexesExec(asTableCatalog(catalog), ident) :: Nil
 

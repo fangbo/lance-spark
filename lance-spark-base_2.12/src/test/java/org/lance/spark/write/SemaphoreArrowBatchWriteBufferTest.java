@@ -26,11 +26,16 @@ import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -53,8 +58,10 @@ public class SemaphoreArrowBatchWriteBufferTest {
 
       final int totalRows = 125;
       final int batchSize = 34;
+      final AtomicReference<Throwable> fragmentCreationError = new AtomicReference<>();
       final SemaphoreArrowBatchWriteBuffer writeBuffer =
-          new SemaphoreArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize);
+          new SemaphoreArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, fragmentCreationError);
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -104,6 +111,83 @@ public class SemaphoreArrowBatchWriteBufferTest {
       readerThread.join();
       assertEquals(totalRows, rowsWritten.get());
       assertEquals(totalRows, rowsRead.get());
+      writeBuffer.close();
+    }
+  }
+
+  @Test
+  public void testWriteErrorPropagation() throws Exception {
+    try (BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
+      Field field =
+          new Field(
+              "column1",
+              FieldType.nullable(org.apache.arrow.vector.types.Types.MinorType.INT.getType()),
+              null);
+      Schema schema = new Schema(Collections.singletonList(field));
+
+      StructType sparkSchema =
+          new StructType(
+              new StructField[] {
+                DataTypes.createStructField("column1", DataTypes.IntegerType, true)
+              });
+
+      final int totalRows = 125;
+      final int batchSize = 34;
+      final AtomicReference<Throwable> fragmentCreationError = new AtomicReference<>();
+      final SemaphoreArrowBatchWriteBuffer writeBuffer =
+          new SemaphoreArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, fragmentCreationError);
+
+      AtomicInteger rowsWritten = new AtomicInteger(0);
+      AtomicInteger rowsRead = new AtomicInteger(0);
+      AtomicLong expectedBytesRead = new AtomicLong(0);
+
+      Callable<Integer> read =
+          () -> {
+            try {
+              if (writeBuffer.loadNextBatch()) {
+                VectorSchemaRoot root = writeBuffer.getVectorSchemaRoot();
+                int rowCount = root.getRowCount();
+                rowsRead.addAndGet(rowCount);
+                try (ArrowRecordBatch recordBatch = new VectorUnloader(root).getRecordBatch()) {
+                  expectedBytesRead.addAndGet(recordBatch.computeBodyLength());
+                }
+                for (int i = 0; i < rowCount; i++) {
+                  int value = (int) root.getVector("column1").getObject(i);
+                  assertEquals(value, rowsRead.get() - rowCount + i + 1);
+                }
+
+                // Throw a mock exception after reading a batch
+                throw new RuntimeException("Mock exception");
+              }
+              return rowsRead.get();
+            } catch (Throwable e) {
+              fragmentCreationError.set(e);
+              throw e;
+            }
+          };
+
+      // Start background thread to read data
+      FutureTask<Integer> readTask = new FutureTask<>(read);
+      Thread readerThread = new Thread(readTask);
+      readerThread.start();
+
+      // Write data
+      Assertions.assertThrows(
+          RuntimeException.class,
+          () -> {
+            for (int i = 0; i < totalRows; i++) {
+              InternalRow row = new GenericInternalRow(new Object[] {i + 1});
+              writeBuffer.write(row);
+              rowsWritten.incrementAndGet();
+            }
+            writeBuffer.setFinished();
+          });
+
+      Assertions.assertThrows(ExecutionException.class, readTask::get);
+
+      assertEquals(batchSize, rowsWritten.get());
+      assertEquals(batchSize, rowsRead.get());
       writeBuffer.close();
     }
   }

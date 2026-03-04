@@ -26,7 +26,9 @@ import javax.annotation.concurrent.GuardedBy;
 
 import java.io.IOException;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Buffers Spark rows into Arrow batches for consumption by Lance fragment creation.
@@ -49,9 +51,14 @@ public class SemaphoreArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
   private final AtomicInteger count = new AtomicInteger(0);
   private final Semaphore writeToken;
   private final Semaphore loadToken;
+  private final AtomicReference<Throwable> fragmentCreationError;
 
   public SemaphoreArrowBatchWriteBuffer(
-      BufferAllocator allocator, Schema schema, StructType sparkSchema, int batchSize) {
+      BufferAllocator allocator,
+      Schema schema,
+      StructType sparkSchema,
+      int batchSize,
+      AtomicReference<Throwable> fragmentCreationError) {
     super(allocator);
     Preconditions.checkNotNull(schema);
     Preconditions.checkArgument(batchSize > 0);
@@ -60,6 +67,12 @@ public class SemaphoreArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
     this.batchSize = batchSize;
     this.writeToken = new Semaphore(0);
     this.loadToken = new Semaphore(0);
+    this.fragmentCreationError = fragmentCreationError;
+  }
+
+  public SemaphoreArrowBatchWriteBuffer(
+      BufferAllocator allocator, Schema schema, StructType sparkSchema, int batchSize) {
+    this(allocator, schema, sparkSchema, batchSize, new AtomicReference<>());
   }
 
   /** Simplified constructor that uses LanceRuntime allocator and converts Spark schema to Arrow. */
@@ -68,26 +81,48 @@ public class SemaphoreArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
         LanceRuntime.allocator(),
         LanceArrowUtils.toArrowSchema(sparkSchema, "UTC", false),
         sparkSchema,
-        batchSize);
+        batchSize,
+        new AtomicReference<>());
+  }
+
+  public SemaphoreArrowBatchWriteBuffer(
+      StructType sparkSchema, int batchSize, AtomicReference<Throwable> fragmentCreationError) {
+    this(
+        LanceRuntime.allocator(),
+        LanceArrowUtils.toArrowSchema(sparkSchema, "UTC", false),
+        sparkSchema,
+        batchSize,
+        fragmentCreationError);
   }
 
   @Override
   public void write(InternalRow row) {
     Preconditions.checkNotNull(row);
-    try {
-      // wait util prepareLoadNextBatch to release write token
-      writeToken.acquire();
 
-      // Write to Arrow buffer
-      arrowWriter.write(row);
-
-      if (count.incrementAndGet() == batchSize) {
-        // notify loadNextBatch to take the batch
-        loadToken.release();
+    // wait until prepareLoadNextBatch releases write token
+    int retry = 0;
+    while (retry++ < 100) {
+      if (fragmentCreationError != null && fragmentCreationError.get() != null) {
+        throw new RuntimeException("Failed to write data to lance", fragmentCreationError.get());
       }
-    } catch (InterruptedException e) {
-      throw new RuntimeException(e);
+
+      try {
+        if (writeToken.tryAcquire(6, TimeUnit.SECONDS)) {
+          // Write to Arrow buffer
+          arrowWriter.write(row);
+
+          if (count.incrementAndGet() == batchSize) {
+            // notify loadNextBatch to take the batch
+            loadToken.release();
+          }
+          return;
+        }
+      } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+      }
     }
+
+    throw new RuntimeException("Timeout to write row to lance.");
   }
 
   @Override
@@ -114,7 +149,7 @@ public class SemaphoreArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
         return false;
       }
 
-      // wait util batch is full or finished
+      // wait until batch is full or finished
       loadToken.acquire();
 
       // Finish the batch (flush Arrow vectors)

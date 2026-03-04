@@ -26,10 +26,14 @@ import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -62,7 +66,8 @@ public class QueuedArrowBatchWriteBufferTest {
       final int batchSize = 34;
       final int queueDepth = 4;
       final QueuedArrowBatchWriteBuffer writeBuffer =
-          new QueuedArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize, queueDepth);
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, queueDepth, new AtomicReference<>());
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -130,7 +135,8 @@ public class QueuedArrowBatchWriteBufferTest {
       final int batchSize = 34; // Will have 1 full batch (34) + 1 partial batch (16)
       final int queueDepth = 2;
       final QueuedArrowBatchWriteBuffer writeBuffer =
-          new QueuedArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize, queueDepth);
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, queueDepth, new AtomicReference<>());
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -181,7 +187,8 @@ public class QueuedArrowBatchWriteBufferTest {
       StructType sparkSchema = createIntSparkSchema();
 
       final QueuedArrowBatchWriteBuffer writeBuffer =
-          new QueuedArrowBatchWriteBuffer(allocator, schema, sparkSchema, 100, 2);
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, 100, 2, new AtomicReference<>());
 
       AtomicInteger batchCount = new AtomicInteger(0);
 
@@ -225,7 +232,8 @@ public class QueuedArrowBatchWriteBufferTest {
       final int batchSize = 512;
       final int queueDepth = 8;
       final QueuedArrowBatchWriteBuffer writeBuffer =
-          new QueuedArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize, queueDepth);
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, queueDepth, new AtomicReference<>());
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -281,7 +289,8 @@ public class QueuedArrowBatchWriteBufferTest {
       final int batchSize = 10;
       final int queueDepth = 1;
       final QueuedArrowBatchWriteBuffer writeBuffer =
-          new QueuedArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize, queueDepth);
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, queueDepth, new AtomicReference<>());
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -348,7 +357,8 @@ public class QueuedArrowBatchWriteBufferTest {
       final int batchSize = 50;
       final int queueDepth = 4;
       final QueuedArrowBatchWriteBuffer writeBuffer =
-          new QueuedArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize, queueDepth);
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, queueDepth, new AtomicReference<>());
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -461,7 +471,8 @@ public class QueuedArrowBatchWriteBufferTest {
       final int batchSize = 10;
       final int queueDepth = 4;
       final QueuedArrowBatchWriteBuffer writeBuffer =
-          new QueuedArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize, queueDepth);
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, queueDepth, new AtomicReference<>());
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -503,6 +514,81 @@ public class QueuedArrowBatchWriteBufferTest {
 
       assertEquals(totalRows, rowsWritten.get());
       assertEquals(totalRows, rowsRead.get());
+      // Queue should have been used (max size > 0 at some point)
+      assertTrue(maxQueueSize.get() >= 0);
+      writeBuffer.close();
+    }
+  }
+
+  @Test
+  public void testWriteErrorPropagation() throws Exception {
+    // Test that the queue buffers batches when consumer is slow
+    try (BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
+      Schema schema = createIntSchema();
+      StructType sparkSchema = createIntSparkSchema();
+
+      final AtomicReference<Throwable> fragmentCreationError = new AtomicReference<>();
+
+      final int totalRows = 100;
+      final int batchSize = 10;
+      final int queueDepth = 4;
+      final QueuedArrowBatchWriteBuffer writeBuffer =
+          new QueuedArrowBatchWriteBuffer(
+              allocator, schema, sparkSchema, batchSize, queueDepth, fragmentCreationError);
+
+      AtomicInteger rowsWritten = new AtomicInteger(0);
+      AtomicInteger rowsRead = new AtomicInteger(0);
+      AtomicInteger maxQueueSize = new AtomicInteger(0);
+
+      Callable<Integer> read =
+          () -> {
+            try {
+              if (writeBuffer.loadNextBatch()) {
+                VectorSchemaRoot root = writeBuffer.getVectorSchemaRoot();
+                rowsRead.addAndGet(root.getRowCount());
+
+                // Throw a mock exception after reading a batch
+                throw new RuntimeException("Mock exception");
+              }
+              return rowsRead.get();
+            } catch (Throwable e) {
+              fragmentCreationError.set(e);
+              throw e;
+            }
+          };
+
+      // Start background thread to read from the queue
+      FutureTask<Integer> readTask = new FutureTask<>(read);
+      Thread readerThread = new Thread(readTask);
+      readerThread.start();
+
+      // Write data to queue until it throws an exception
+      Assertions.assertThrows(
+          RuntimeException.class,
+          () -> {
+            try {
+              for (int i = 0; i < totalRows; i++) {
+                InternalRow row = new GenericInternalRow(new Object[] {i + 1});
+                writeBuffer.write(row);
+                // Track max queue size
+                int currentSize = writeBuffer.getCurrentQueueSize();
+                maxQueueSize.updateAndGet(prev -> Math.max(prev, currentSize));
+                rowsWritten.incrementAndGet();
+
+                if (rowsWritten.get() >= batchSize) {
+                  // Wait some time to allow the reader to read a batch and throw an exception
+                  Thread.sleep(2000);
+                }
+              }
+            } finally {
+              writeBuffer.setFinished();
+            }
+          });
+
+      Assertions.assertThrows(ExecutionException.class, readTask::get);
+
+      assertEquals(batchSize, rowsWritten.get());
+      assertEquals(batchSize, rowsRead.get());
       // Queue should have been used (max size > 0 at some point)
       assertTrue(maxQueueSize.get() >= 0);
       writeBuffer.close();

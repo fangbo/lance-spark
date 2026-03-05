@@ -59,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistributionAndOrdering {
   private final StructType sparkSchema;
@@ -218,6 +219,8 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
 
     @Override
     public DeltaWriter<InternalRow> createWriter(int partitionId, long taskId) {
+      final AtomicReference<Throwable> fragmentCreationError = new AtomicReference<>();
+
       int batchSize = writeOptions.getBatchSize();
       boolean useQueuedBuffer = writeOptions.isUseQueuedWriteBuffer();
 
@@ -228,7 +231,7 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
       ArrowBatchWriteBuffer writeBuffer;
       if (useQueuedBuffer) {
         int queueDepth = writeOptions.getQueueDepth();
-        writeBuffer = new QueuedArrowBatchWriteBuffer(sparkSchema, batchSize, queueDepth);
+        writeBuffer = new QueuedArrowBatchWriteBuffer(sparkSchema, batchSize, queueDepth, fragmentCreationError);
       } else {
         writeBuffer = new SemaphoreArrowBatchWriteBuffer(sparkSchema, batchSize);
       }

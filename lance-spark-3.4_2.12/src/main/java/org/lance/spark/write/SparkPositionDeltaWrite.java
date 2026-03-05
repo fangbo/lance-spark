@@ -231,7 +231,9 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
       ArrowBatchWriteBuffer writeBuffer;
       if (useQueuedBuffer) {
         int queueDepth = writeOptions.getQueueDepth();
-        writeBuffer = new QueuedArrowBatchWriteBuffer(sparkSchema, batchSize, queueDepth, fragmentCreationError);
+        writeBuffer =
+            new QueuedArrowBatchWriteBuffer(
+                sparkSchema, batchSize, queueDepth, fragmentCreationError);
       } else {
         writeBuffer = new SemaphoreArrowBatchWriteBuffer(sparkSchema, batchSize);
       }

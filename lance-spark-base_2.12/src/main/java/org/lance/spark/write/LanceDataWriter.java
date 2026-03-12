@@ -36,7 +36,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class LanceDataWriter implements DataWriter<InternalRow> {
   private ArrowBatchWriteBuffer writeBuffer;
@@ -126,8 +125,6 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
 
     @Override
     public DataWriter<InternalRow> createWriter(int partitionId, long taskId) {
-      final AtomicReference<Throwable> fragmentCreationError = new AtomicReference<>();
-
       int batchSize = writeOptions.getBatchSize();
       boolean useQueuedBuffer = writeOptions.isUseQueuedWriteBuffer();
 
@@ -138,10 +135,9 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
       ArrowBatchWriteBuffer writeBuffer;
       if (useQueuedBuffer) {
         int queueDepth = writeOptions.getQueueDepth();
-        writeBuffer =
-            new QueuedArrowBatchWriteBuffer(schema, batchSize, queueDepth, fragmentCreationError);
+        writeBuffer = new QueuedArrowBatchWriteBuffer(schema, batchSize, queueDepth);
       } else {
-        writeBuffer = new SemaphoreArrowBatchWriteBuffer(schema, batchSize, fragmentCreationError);
+        writeBuffer = new SemaphoreArrowBatchWriteBuffer(schema, batchSize);
       }
 
       // Get storage options provider for credential refresh
@@ -155,12 +151,16 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
               Data.exportArrayStream(LanceRuntime.allocator(), writeBuffer, arrowStream);
               return Fragment.create(
                   writeOptions.getDatasetUri(), arrowStream, params, storageOptionsProvider);
-            } catch (Throwable e) {
-              fragmentCreationError.set(e);
-              throw e;
             }
           };
-      FutureTask<List<FragmentMetadata>> fragmentCreationTask = new FutureTask<>(fragmentCreator);
+      FutureTask<List<FragmentMetadata>> fragmentCreationTask =
+          new FutureTask<>(fragmentCreator) {
+            @Override
+            protected void done() {
+              writeBuffer.onTaskComplete();
+            }
+          };
+      writeBuffer.setFragmentCreationTask(fragmentCreationTask);
       Thread fragmentCreationThread = new Thread(fragmentCreationTask);
       fragmentCreationThread.start();
 

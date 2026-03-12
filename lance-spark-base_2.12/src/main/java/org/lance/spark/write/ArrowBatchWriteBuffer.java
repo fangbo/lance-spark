@@ -17,6 +17,9 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.ipc.ArrowReader;
 import org.apache.spark.sql.catalyst.InternalRow;
 
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+
 /**
  * Abstract base class for Arrow batch write buffers that bridge Spark row writing and Lance
  * fragment creation.
@@ -26,6 +29,8 @@ import org.apache.spark.sql.catalyst.InternalRow;
  * configured at runtime.
  */
 public abstract class ArrowBatchWriteBuffer extends ArrowReader {
+
+  private volatile Future<?> fragmentCreationTask;
 
   protected ArrowBatchWriteBuffer(BufferAllocator allocator) {
     super(allocator);
@@ -40,4 +45,38 @@ public abstract class ArrowBatchWriteBuffer extends ArrowReader {
 
   /** Signals that writing is complete. Any buffered data should be flushed. */
   public abstract void setFinished();
+
+  /**
+   * Sets the fragment creation task so the buffer can check for errors. Callers should override
+   * {@link java.util.concurrent.FutureTask#done()} to call {@link #onTaskComplete()} so that
+   * blocked writers are woken immediately on task failure.
+   */
+  public void setFragmentCreationTask(Future<?> task) {
+    this.fragmentCreationTask = task;
+  }
+
+  /**
+   * Called when the fragment creation task completes. Subclasses override this to wake blocked
+   * writer threads.
+   */
+  public void onTaskComplete() {
+    // No-op by default; overridden by SemaphoreArrowBatchWriteBuffer to signal canWrite
+  }
+
+  /**
+   * Checks if the fragment creation task has failed and throws the error if so. The {@link
+   * java.util.concurrent.FutureTask} is the single source of truth for errors.
+   */
+  protected void checkForError() {
+    if (fragmentCreationTask != null && fragmentCreationTask.isDone()) {
+      try {
+        fragmentCreationTask.get();
+      } catch (ExecutionException e) {
+        throw new RuntimeException("Failed to write data to lance", e.getCause());
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new RuntimeException(e);
+      }
+    }
+  }
 }

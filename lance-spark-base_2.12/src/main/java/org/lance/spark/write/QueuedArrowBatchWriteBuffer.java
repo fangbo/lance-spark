@@ -28,7 +28,6 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Queue-based buffer for Arrow batches that enables pipelined batch processing.
@@ -59,9 +58,6 @@ public class QueuedArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
   /** Queue holding completed batches ready for consumption. */
   private final BlockingQueue<VectorSchemaRoot> batchQueue;
 
-  /** Reference to hold any error during fragment creation for error propagation. */
-  private final AtomicReference<Throwable> fragmentCreationError;
-
   /** Child allocator for producer batches (shares root with consumer for buffer transfer). */
   private final BufferAllocator producerAllocator;
 
@@ -85,27 +81,22 @@ public class QueuedArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
 
   public QueuedArrowBatchWriteBuffer(
       BufferAllocator allocator, Schema schema, StructType sparkSchema, int batchSize) {
-    this(allocator, schema, sparkSchema, batchSize, DEFAULT_QUEUE_DEPTH, new AtomicReference<>());
+    this(allocator, schema, sparkSchema, batchSize, DEFAULT_QUEUE_DEPTH);
   }
 
   /** Simplified constructor that uses LanceRuntime allocator and converts Spark schema to Arrow. */
   public QueuedArrowBatchWriteBuffer(StructType sparkSchema, int batchSize) {
-    this(sparkSchema, batchSize, DEFAULT_QUEUE_DEPTH, new AtomicReference<>());
+    this(sparkSchema, batchSize, DEFAULT_QUEUE_DEPTH);
   }
 
   /** Simplified constructor that uses LanceRuntime allocator and converts Spark schema to Arrow. */
-  public QueuedArrowBatchWriteBuffer(
-      StructType sparkSchema,
-      int batchSize,
-      int queueDepth,
-      AtomicReference<Throwable> fragmentCreationError) {
+  public QueuedArrowBatchWriteBuffer(StructType sparkSchema, int batchSize, int queueDepth) {
     this(
         LanceRuntime.allocator(),
         LanceArrowUtils.toArrowSchema(sparkSchema, "UTC", false),
         sparkSchema,
         batchSize,
-        queueDepth,
-        fragmentCreationError);
+        queueDepth);
   }
 
   public QueuedArrowBatchWriteBuffer(
@@ -113,8 +104,7 @@ public class QueuedArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
       Schema schema,
       StructType sparkSchema,
       int batchSize,
-      int queueDepth,
-      AtomicReference<Throwable> fragmentCreationError) {
+      int queueDepth) {
     super(allocator);
     Preconditions.checkNotNull(schema);
     Preconditions.checkArgument(batchSize > 0, "Batch size must be positive");
@@ -125,7 +115,6 @@ public class QueuedArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
     this.batchSize = batchSize;
     this.queueDepth = queueDepth;
     this.batchQueue = new ArrayBlockingQueue<>(queueDepth);
-    this.fragmentCreationError = fragmentCreationError;
 
     // Create a child allocator for producer that shares the same root as the consumer
     // allocator. This is required for Arrow buffer transfer between producer and consumer.
@@ -159,9 +148,7 @@ public class QueuedArrowBatchWriteBuffer extends ArrowBatchWriteBuffer {
     Preconditions.checkNotNull(row);
     Preconditions.checkState(!producerFinished, "Cannot write after setFinished() is called");
 
-    if (fragmentCreationError.get() != null) {
-      throw new RuntimeException("Failed to write data to lance", fragmentCreationError.get());
-    }
+    checkForError();
 
     try {
       currentArrowWriter.write(row);

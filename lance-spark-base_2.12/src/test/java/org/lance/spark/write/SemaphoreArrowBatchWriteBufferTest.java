@@ -35,80 +35,174 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class SemaphoreArrowBatchWriteBufferTest {
+
+  private Schema createIntSchema() {
+    Field field =
+        new Field(
+            "column1",
+            FieldType.nullable(org.apache.arrow.vector.types.Types.MinorType.INT.getType()),
+            null);
+    return new Schema(Collections.singletonList(field));
+  }
+
+  private StructType createIntSparkSchema() {
+    return new StructType(
+        new StructField[] {DataTypes.createStructField("column1", DataTypes.IntegerType, true)});
+  }
+
+  private void runWriterReader(
+      SemaphoreArrowBatchWriteBuffer writeBuffer,
+      int totalRows,
+      AtomicInteger rowsWritten,
+      AtomicInteger rowsRead)
+      throws Exception {
+    Thread writerThread =
+        new Thread(
+            () -> {
+              for (int i = 0; i < totalRows; i++) {
+                InternalRow row =
+                    new GenericInternalRow(new Object[] {rowsWritten.incrementAndGet()});
+                writeBuffer.write(row);
+              }
+              writeBuffer.setFinished();
+            });
+
+    Callable<Void> readerCallable =
+        () -> {
+          while (writeBuffer.loadNextBatch()) {
+            VectorSchemaRoot root = writeBuffer.getVectorSchemaRoot();
+            int rowCount = root.getRowCount();
+            int baseValue = rowsRead.get();
+            rowsRead.addAndGet(rowCount);
+            for (int i = 0; i < rowCount; i++) {
+              int value = (int) root.getVector("column1").getObject(i);
+              assertEquals(baseValue + i + 1, value);
+            }
+          }
+          return null;
+        };
+
+    FutureTask<Void> readerTask =
+        new FutureTask<>(readerCallable) {
+          @Override
+          protected void done() {
+            writeBuffer.onTaskComplete();
+          }
+        };
+    writeBuffer.setFragmentCreationTask(readerTask);
+
+    Thread readerThread = new Thread(readerTask);
+    writerThread.start();
+    readerThread.start();
+    writerThread.join();
+    readerThread.join();
+  }
+
   @Test
   public void test() throws Exception {
     try (BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
-      Field field =
-          new Field(
-              "column1",
-              FieldType.nullable(org.apache.arrow.vector.types.Types.MinorType.INT.getType()),
-              null);
-      Schema schema = new Schema(Collections.singletonList(field));
-
-      StructType sparkSchema =
-          new StructType(
-              new StructField[] {
-                DataTypes.createStructField("column1", DataTypes.IntegerType, true)
-              });
+      Schema schema = createIntSchema();
+      StructType sparkSchema = createIntSparkSchema();
 
       final int totalRows = 125;
       final int batchSize = 34;
-      final AtomicReference<Throwable> fragmentCreationError = new AtomicReference<>();
       final SemaphoreArrowBatchWriteBuffer writeBuffer =
-          new SemaphoreArrowBatchWriteBuffer(
-              allocator, schema, sparkSchema, batchSize, fragmentCreationError);
+          new SemaphoreArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize);
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
-      AtomicLong expectedBytesRead = new AtomicLong(0);
 
-      Thread writerThread =
-          new Thread(
-              () -> {
-                try {
-                  for (int i = 0; i < totalRows; i++) {
-                    InternalRow row =
-                        new GenericInternalRow(new Object[] {rowsWritten.incrementAndGet()});
-                    writeBuffer.write(row);
-                  }
-                  writeBuffer.setFinished();
-                } catch (Exception e) {
-                  e.printStackTrace();
-                  throw e;
-                }
-              });
+      runWriterReader(writeBuffer, totalRows, rowsWritten, rowsRead);
 
-      Thread readerThread =
-          new Thread(
-              () -> {
-                try {
-                  while (writeBuffer.loadNextBatch()) {
-                    VectorSchemaRoot root = writeBuffer.getVectorSchemaRoot();
-                    int rowCount = root.getRowCount();
-                    rowsRead.addAndGet(rowCount);
-                    try (ArrowRecordBatch recordBatch = new VectorUnloader(root).getRecordBatch()) {
-                      expectedBytesRead.addAndGet(recordBatch.computeBodyLength());
-                    }
-                    for (int i = 0; i < rowCount; i++) {
-                      int value = (int) root.getVector("column1").getObject(i);
-                      assertEquals(value, rowsRead.get() - rowCount + i + 1);
-                    }
-                  }
-                } catch (Exception e) {
-                  e.printStackTrace();
-                }
-              });
+      assertEquals(totalRows, rowsWritten.get());
+      assertEquals(totalRows, rowsRead.get());
+      writeBuffer.close();
+    }
+  }
 
+  @Test
+  public void testEmptyWrite() throws Exception {
+    try (BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
+      Schema schema = createIntSchema();
+      StructType sparkSchema = createIntSparkSchema();
+
+      final SemaphoreArrowBatchWriteBuffer writeBuffer =
+          new SemaphoreArrowBatchWriteBuffer(allocator, schema, sparkSchema, 34);
+
+      AtomicInteger batchCount = new AtomicInteger(0);
+
+      Thread writerThread = new Thread(writeBuffer::setFinished);
+
+      Callable<Void> readerCallable =
+          () -> {
+            while (writeBuffer.loadNextBatch()) {
+              batchCount.incrementAndGet();
+            }
+            return null;
+          };
+
+      FutureTask<Void> readerTask =
+          new FutureTask<>(readerCallable) {
+            @Override
+            protected void done() {
+              writeBuffer.onTaskComplete();
+            }
+          };
+      writeBuffer.setFragmentCreationTask(readerTask);
+
+      Thread readerThread = new Thread(readerTask);
       writerThread.start();
       readerThread.start();
-
       writerThread.join();
       readerThread.join();
+
+      assertEquals(0, batchCount.get());
+      writeBuffer.close();
+    }
+  }
+
+  @Test
+  public void testExactBatchBoundary() throws Exception {
+    try (BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
+      Schema schema = createIntSchema();
+      StructType sparkSchema = createIntSparkSchema();
+
+      final int batchSize = 25;
+      final int totalRows = batchSize * 4; // exactly 100 rows = 4 full batches
+      final SemaphoreArrowBatchWriteBuffer writeBuffer =
+          new SemaphoreArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize);
+
+      AtomicInteger rowsWritten = new AtomicInteger(0);
+      AtomicInteger rowsRead = new AtomicInteger(0);
+
+      runWriterReader(writeBuffer, totalRows, rowsWritten, rowsRead);
+
+      assertEquals(totalRows, rowsWritten.get());
+      assertEquals(totalRows, rowsRead.get());
+      writeBuffer.close();
+    }
+  }
+
+  @Test
+  public void testSingleRowBatch() throws Exception {
+    try (BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
+      Schema schema = createIntSchema();
+      StructType sparkSchema = createIntSparkSchema();
+
+      final int totalRows = 50;
+      final int batchSize = 1;
+      final SemaphoreArrowBatchWriteBuffer writeBuffer =
+          new SemaphoreArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize);
+
+      AtomicInteger rowsWritten = new AtomicInteger(0);
+      AtomicInteger rowsRead = new AtomicInteger(0);
+
+      runWriterReader(writeBuffer, totalRows, rowsWritten, rowsRead);
+
       assertEquals(totalRows, rowsWritten.get());
       assertEquals(totalRows, rowsRead.get());
       writeBuffer.close();
@@ -118,25 +212,13 @@ public class SemaphoreArrowBatchWriteBufferTest {
   @Test
   public void testWriteErrorPropagation() throws Exception {
     try (BufferAllocator allocator = new RootAllocator(Long.MAX_VALUE)) {
-      Field field =
-          new Field(
-              "column1",
-              FieldType.nullable(org.apache.arrow.vector.types.Types.MinorType.INT.getType()),
-              null);
-      Schema schema = new Schema(Collections.singletonList(field));
-
-      StructType sparkSchema =
-          new StructType(
-              new StructField[] {
-                DataTypes.createStructField("column1", DataTypes.IntegerType, true)
-              });
+      Schema schema = createIntSchema();
+      StructType sparkSchema = createIntSparkSchema();
 
       final int totalRows = 125;
       final int batchSize = 34;
-      final AtomicReference<Throwable> fragmentCreationError = new AtomicReference<>();
       final SemaphoreArrowBatchWriteBuffer writeBuffer =
-          new SemaphoreArrowBatchWriteBuffer(
-              allocator, schema, sparkSchema, batchSize, fragmentCreationError);
+          new SemaphoreArrowBatchWriteBuffer(allocator, schema, sparkSchema, batchSize);
 
       AtomicInteger rowsWritten = new AtomicInteger(0);
       AtomicInteger rowsRead = new AtomicInteger(0);
@@ -144,31 +226,33 @@ public class SemaphoreArrowBatchWriteBufferTest {
 
       Callable<Integer> read =
           () -> {
-            try {
-              if (writeBuffer.loadNextBatch()) {
-                VectorSchemaRoot root = writeBuffer.getVectorSchemaRoot();
-                int rowCount = root.getRowCount();
-                rowsRead.addAndGet(rowCount);
-                try (ArrowRecordBatch recordBatch = new VectorUnloader(root).getRecordBatch()) {
-                  expectedBytesRead.addAndGet(recordBatch.computeBodyLength());
-                }
-                for (int i = 0; i < rowCount; i++) {
-                  int value = (int) root.getVector("column1").getObject(i);
-                  assertEquals(value, rowsRead.get() - rowCount + i + 1);
-                }
-
-                // Throw a mock exception after reading a batch
-                throw new RuntimeException("Mock exception");
+            if (writeBuffer.loadNextBatch()) {
+              VectorSchemaRoot root = writeBuffer.getVectorSchemaRoot();
+              int rowCount = root.getRowCount();
+              rowsRead.addAndGet(rowCount);
+              try (ArrowRecordBatch recordBatch = new VectorUnloader(root).getRecordBatch()) {
+                expectedBytesRead.addAndGet(recordBatch.computeBodyLength());
               }
-              return rowsRead.get();
-            } catch (Throwable e) {
-              fragmentCreationError.set(e);
-              throw e;
+              for (int i = 0; i < rowCount; i++) {
+                int value = (int) root.getVector("column1").getObject(i);
+                assertEquals(value, rowsRead.get() - rowCount + i + 1);
+              }
+
+              // Throw a mock exception after reading a batch
+              throw new RuntimeException("Mock exception");
             }
+            return rowsRead.get();
           };
 
       // Start background thread to read data
-      FutureTask<Integer> readTask = new FutureTask<>(read);
+      FutureTask<Integer> readTask =
+          new FutureTask<>(read) {
+            @Override
+            protected void done() {
+              writeBuffer.onTaskComplete();
+            }
+          };
+      writeBuffer.setFragmentCreationTask(readTask);
       Thread readerThread = new Thread(readTask);
       readerThread.start();
 

@@ -32,6 +32,7 @@ import org.lance.index.scalar.{BTreeIndexParams, ScalarIndexParams}
 import org.lance.operation.{CreateIndex => AddIndexOperation}
 import org.lance.spark.{BaseLanceNamespaceSparkCatalog, LanceDataset, LanceRuntime, LanceSparkReadOptions}
 import org.lance.spark.arrow.LanceArrowWriter
+import org.lance.spark.utils.CloseableUtil
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
 import java.util.{Collections, Optional, UUID}
@@ -446,8 +447,8 @@ case class RangeBTreeIndexBuilder(
       streamWriter.writeBatch()
       streamWriter.end()
     } finally {
-      streamWriter.close()
-      data.close()
+      CloseableUtil.closeQuietly(streamWriter)
+      CloseableUtil.closeQuietly(data)
     }
 
     val arrowData = out.toByteArray()
@@ -488,11 +489,11 @@ case class RangeBTreeIndexBuilder(
 
       dataset.createIndex(indexOptions)
     } finally {
-      stream.close()
-      reader.close()
+      CloseableUtil.closeQuietly(stream)
+      CloseableUtil.closeQuietly(reader)
 
       if (dataset != null) {
-        dataset.close()
+        CloseableUtil.closeQuietly(dataset)
       }
     }
 

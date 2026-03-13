@@ -41,9 +41,12 @@ import scala.jdk.CollectionConverters._
 /**
  * Physical execution of distributed CREATE INDEX (ALTER TABLE ... CREATE INDEX ...) for Lance datasets.
  *
- * This builds per-fragment indexes with the provided options, merges index metadata
+ * <ul>
+ * <li>For BTREE index, it uses a range-based approach that redistributes and sorts data across partitions, creates indexes for each range in parallel, and finally merges them into a global index structure.
+ * <li>For other index types, it processes each fragment independently in parallel, merges index metadata
  * and commits an index-creation transaction.
- */
+ </ul>
+ **/
 case class AddIndexExec(
     catalog: TableCatalog,
     ident: Identifier,
@@ -251,7 +254,7 @@ class FragmentBasedIndexJob(
  *
  * @param encodedReadOptions    Configuration for Lance dataset access, serialized
  * @param columns               column names to index
- * @param method                Indexing method to use (e.g., "btree", "ivf_pq")
+ * @param method                Indexing method to use (e.g., "fts")
  * @param argsJson              JSON string containing index parameters
  * @param indexName             Name of the index being created
  * @param uuid                  Unique identifier for this index operation
@@ -429,7 +432,7 @@ case class RangeBTreeIndexBuilder(
 
     writer.finish()
 
-    // No any row is written
+    // No rows are written
     if (data.getRowCount == 0) {
       data.close()
       return Iterator.empty
@@ -444,6 +447,7 @@ case class RangeBTreeIndexBuilder(
       streamWriter.end()
     } finally {
       streamWriter.close()
+      data.close()
     }
 
     val arrowData = out.toByteArray()
@@ -453,14 +457,16 @@ case class RangeBTreeIndexBuilder(
     val reader = new ArrowStreamReader(in, allocator)
     val stream = ArrowArrayStream.allocateNew(allocator)
 
-    val dataset = IndexUtils.openDatasetWithOptions(
-      decode[LanceSparkReadOptions](encodedReadOptions),
-      initialStorageOptions,
-      namespaceImpl,
-      namespaceProperties,
-      tableId)
+    var dataset: Dataset = null
 
     try {
+      dataset = IndexUtils.openDatasetWithOptions(
+        decode[LanceSparkReadOptions](encodedReadOptions),
+        initialStorageOptions,
+        namespaceImpl,
+        namespaceProperties,
+        tableId)
+
       Data.exportArrayStream(allocator, reader, stream)
 
       // Build btree index for data in this range
@@ -484,7 +490,10 @@ case class RangeBTreeIndexBuilder(
     } finally {
       stream.close()
       reader.close()
-      dataset.close()
+
+      if (dataset != null) {
+        dataset.close()
+      }
     }
 
     Iterator.empty

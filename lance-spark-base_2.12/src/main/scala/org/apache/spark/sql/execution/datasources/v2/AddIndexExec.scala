@@ -45,8 +45,8 @@ import scala.jdk.CollectionConverters._
  * <li>For BTREE index, it uses a range-based approach that redistributes and sorts data across partitions, creates indexes for each range in parallel, and finally merges them into a global index structure.
  * <li>For other index types, it processes each fragment independently in parallel, merges index metadata
  * and commits an index-creation transaction.
- </ul>
- **/
+ * </ul>
+ */
 case class AddIndexExec(
     catalog: TableCatalog,
     ident: Identifier,

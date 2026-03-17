@@ -159,7 +159,8 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
                   writeOptions.getDatasetUri(), arrowStream, params, storageOptionsProvider);
             }
           };
-      FutureTask<List<FragmentMetadata>> fragmentCreationTask = new FutureTask<>(fragmentCreator);
+      FutureTask<List<FragmentMetadata>> fragmentCreationTask =
+          writeBuffer.createTrackedTask(fragmentCreator);
       Thread fragmentCreationThread = new Thread(fragmentCreationTask);
       fragmentCreationThread.start();
 

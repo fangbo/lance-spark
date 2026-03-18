@@ -13,4 +13,29 @@
  */
 package org.lance.spark.update;
 
-public class UpdateTableTest extends BaseUpdateTableTest {}
+public class UpdateTableTest extends BaseUpdateTableTest {
+  @BeforeEach
+  void setup() {
+    spark =
+        SparkSession.builder()
+            .appName("lance-namespace-test")
+            .master("local[4]")
+            .config(
+                "spark.sql.catalog." + catalogName, "org.lance.spark.LanceNamespaceSparkCatalog")
+            .config(
+                "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
+            .config("spark.sql.catalog." + catalogName + ".impl", getNsImpl())
+            .getOrCreate();
+
+    Map<String, String> additionalConfigs = getAdditionalNsConfigs();
+    for (Map.Entry<String, String> entry : additionalConfigs.entrySet()) {
+      spark.conf().set("spark.sql.catalog." + catalogName + "." + entry.getKey(), entry.getValue());
+    }
+
+    spark.conf().set(SparkUtil.REWRITE_COLUMNS, "true");
+
+    catalog = (TableCatalog) spark.sessionState().catalogManager().catalog(catalogName);
+    // Create default namespace for multi-level namespace mode
+    spark.sql("CREATE NAMESPACE IF NOT EXISTS " + catalogName + ".default");
+  }
+}

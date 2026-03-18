@@ -378,7 +378,7 @@ public abstract class BaseUpdateTableTest {
             Row.of(3, "Charlie", 300, "Charlie", 300, Arrays.asList(301, 302))));
   }
 
-  private static class TableOperator {
+  protected static class TableOperator {
     private final SparkSession spark;
     private final String catalogName;
     private final String tableName;
@@ -476,7 +476,7 @@ public abstract class BaseUpdateTableTest {
     }
   }
 
-  private static class Row {
+  protected static class Row {
     int id;
     String name;
     int value;
@@ -484,7 +484,7 @@ public abstract class BaseUpdateTableTest {
     int metaValue;
     List<Integer> values;
 
-    private static Row of(
+    protected static Row of(
         int id, String name, int value, String metaName, int metaValue, List<Integer> values) {
       Row row = new Row();
       row.id = id;

@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.Map;
 
-public class UpdateTableRewriteRowsTest extends UpdateTableTest {
+public class UpdateTableRewriteRowsTest extends BaseUpdateTableTest {
   @BeforeEach
   void setup() {
     spark =

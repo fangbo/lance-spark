@@ -317,6 +317,100 @@ class TestDDLStagingTable:
         assert "value" not in col_names
 
 
+class TestDDLAlterTableProperties:
+    """Test ALTER TABLE SET/UNSET TBLPROPERTIES operations."""
+
+    def test_set_tblproperties(self, spark):
+        """SET TBLPROPERTIES stores properties visible via SHOW TBLPROPERTIES."""
+        spark.sql("""
+            CREATE TABLE default.test_table (id INT, name STRING, value INT)
+        """)
+        spark.sql("""
+            ALTER TABLE default.test_table
+            SET TBLPROPERTIES ('team' = 'data-eng', 'version' = '2.0')
+        """)
+
+        rows = spark.sql("SHOW TBLPROPERTIES default.test_table").collect()
+        props = {row.key: row.value for row in rows}
+
+        assert props["team"] == "data-eng"
+        assert props["version"] == "2.0"
+
+    def test_unset_tblproperties(self, spark):
+        """UNSET TBLPROPERTIES removes a previously set property."""
+        spark.sql("CREATE TABLE default.test_table (id INT, value INT)")
+        spark.sql("""
+            ALTER TABLE default.test_table
+            SET TBLPROPERTIES ('team' = 'data-eng', 'env' = 'prod')
+        """)
+        spark.sql("""
+            ALTER TABLE default.test_table
+            UNSET TBLPROPERTIES ('team')
+        """)
+
+        rows = spark.sql("SHOW TBLPROPERTIES default.test_table").collect()
+        props = {row.key: row.value for row in rows}
+
+        assert "team" not in props
+        assert props["env"] == "prod"
+
+    def test_set_custom_properties(self, spark):
+        """SET TBLPROPERTIES with custom key-value pairs does not break the table."""
+        spark.sql("CREATE TABLE default.test_table (id INT, name STRING)")
+        spark.sql("""
+            ALTER TABLE default.test_table
+            SET TBLPROPERTIES ('team' = 'data-eng', 'version' = '2.0')
+        """)
+
+        spark.sql("INSERT INTO default.test_table VALUES (1, 'test')")
+        result = spark.sql("SELECT * FROM default.test_table").collect()
+
+        assert len(result) == 1
+        assert result[0].id == 1
+
+    def test_overwrite_existing_property(self, spark):
+        """SET TBLPROPERTIES overwrites an existing property value."""
+        spark.sql("CREATE TABLE default.test_table (id INT, value INT)")
+        spark.sql("""
+            ALTER TABLE default.test_table
+            SET TBLPROPERTIES ('env' = 'staging')
+        """)
+        spark.sql("""
+            ALTER TABLE default.test_table
+            SET TBLPROPERTIES ('env' = 'production')
+        """)
+
+        rows = spark.sql("SHOW TBLPROPERTIES default.test_table").collect()
+        props = {row.key: row.value for row in rows}
+
+        assert props["env"] == "production"
+
+    def test_set_properties_on_nonexistent_table(self, spark):
+        """SET TBLPROPERTIES on non-existent table raises an error."""
+        with pytest.raises(Exception) as exc_info:
+            spark.sql("""
+                ALTER TABLE default.nonexistent_props_table
+                SET TBLPROPERTIES ('key' = 'value')
+            """)
+        assert "TABLE_OR_VIEW_NOT_FOUND" in str(exc_info.value)
+
+    def test_properties_persist_after_insert(self, spark):
+        """Table properties are not lost after DML operations."""
+        spark.sql("CREATE TABLE default.test_table (id INT, value INT)")
+        spark.sql("""
+            ALTER TABLE default.test_table
+            SET TBLPROPERTIES ('team' = 'data-eng')
+        """)
+
+        spark.sql("INSERT INTO default.test_table VALUES (1, 100)")
+        spark.sql("INSERT INTO default.test_table VALUES (2, 200)")
+
+        rows = spark.sql("SHOW TBLPROPERTIES default.test_table").collect()
+        props = {row.key: row.value for row in rows}
+
+        assert props["team"] == "data-eng"
+
+
 class TestDDLIndex:
     """Test DDL index operations: CREATE INDEX (BTree, FTS)."""
 

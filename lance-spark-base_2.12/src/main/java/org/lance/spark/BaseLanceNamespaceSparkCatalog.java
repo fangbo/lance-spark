@@ -35,6 +35,7 @@ import org.lance.spark.utils.Optional;
 import org.lance.spark.utils.SchemaConverter;
 import org.lance.spark.utils.Utils;
 import org.lance.spark.write.StagedCommit;
+import org.lance.spark.write.StagedCommitOptions;
 
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
@@ -842,9 +843,14 @@ public abstract class BaseLanceNamespaceSparkCatalog
     Schema arrowSchema = LanceArrowUtils.toArrowSchema(processedSchema, "UTC", true);
     Map<String, String> merged =
         LanceRuntime.mergeStorageOptions(catalogConfig.getStorageOptions(), initialStorageOptions);
-    StagedCommit stagedCommit =
-        StagedCommit.forNewTable(
-            arrowSchema, location, merged, namespace, tableIdList, managedVersioning);
+    final StagedCommitOptions commitOptions =
+        StagedCommitOptions.of(
+            merged,
+            catalogConfig.isEnableStableRowIds(properties),
+            namespace,
+            tableIdList,
+            managedVersioning);
+    StagedCommit stagedCommit = StagedCommit.forNewTable(arrowSchema, location, commitOptions);
     String fileFormatVersion = catalogConfig.getFileFormatVersion(properties);
     return createStagedDataset(
         readOptions,
@@ -869,9 +875,10 @@ public abstract class BaseLanceNamespaceSparkCatalog
             datasetUri, catalogConfig, Optional.empty(), Optional.empty(), Optional.empty(), name);
 
     Schema arrowSchema = LanceArrowUtils.toArrowSchema(processedSchema, "UTC", true);
-    StagedCommit stagedCommit =
-        StagedCommit.forNewTable(
-            arrowSchema, datasetUri, catalogConfig.getStorageOptions(), null, null, false);
+    final StagedCommitOptions commitOptions =
+        StagedCommitOptions.pathBased(
+            catalogConfig.getStorageOptions(), catalogConfig.isEnableStableRowIds(properties));
+    StagedCommit stagedCommit = StagedCommit.forNewTable(arrowSchema, datasetUri, commitOptions);
     String fileFormatVersion = catalogConfig.getFileFormatVersion(properties);
     return createStagedDataset(
         readOptions,
@@ -905,9 +912,14 @@ public abstract class BaseLanceNamespaceSparkCatalog
     Dataset ds = openDataset(resolved.readOptions);
     Map<String, String> merged =
         LanceRuntime.mergeStorageOptions(catalogConfig.getStorageOptions(), initialStorageOptions);
-    StagedCommit stagedCommit =
-        StagedCommit.forExistingTable(
-            ds, arrowSchema, merged, namespace, resolved.tableIdList, managedVersioning);
+    final StagedCommitOptions commitOptions =
+        StagedCommitOptions.of(
+            merged,
+            catalogConfig.isEnableStableRowIds(properties),
+            namespace,
+            resolved.tableIdList,
+            managedVersioning);
+    StagedCommit stagedCommit = StagedCommit.forExistingTable(ds, arrowSchema, commitOptions);
     // Use specified file format version, or fall back to existing table's version
     String fileFormatVersion = catalogConfig.getFileFormatVersion(properties);
     if (fileFormatVersion == null) {
@@ -944,9 +956,10 @@ public abstract class BaseLanceNamespaceSparkCatalog
     }
 
     Schema arrowSchema = LanceArrowUtils.toArrowSchema(processedSchema, "UTC", true);
-    StagedCommit stagedCommit =
-        StagedCommit.forExistingTable(
-            ds, arrowSchema, catalogConfig.getStorageOptions(), null, null, false);
+    final StagedCommitOptions commitOptions =
+        StagedCommitOptions.pathBased(
+            catalogConfig.getStorageOptions(), catalogConfig.isEnableStableRowIds(properties));
+    StagedCommit stagedCommit = StagedCommit.forExistingTable(ds, arrowSchema, commitOptions);
     // Use specified file format version, or fall back to existing table's version
     String fileFormatVersion = catalogConfig.getFileFormatVersion(properties);
     if (fileFormatVersion == null) {
@@ -1015,23 +1028,26 @@ public abstract class BaseLanceNamespaceSparkCatalog
             name);
 
     Schema arrowSchema = LanceArrowUtils.toArrowSchema(processedSchema, "UTC", true);
-    StagedCommit stagedCommit;
     // Use specified file format version, or fall back to existing table's version
     String fileFormatVersion = catalogConfig.getFileFormatVersion(properties);
     Map<String, String> merged =
         LanceRuntime.mergeStorageOptions(catalogConfig.getStorageOptions(), initialStorageOptions);
+    final StagedCommitOptions commitOptions =
+        StagedCommitOptions.of(
+            merged,
+            catalogConfig.isEnableStableRowIds(properties),
+            namespace,
+            tableIdList,
+            managedVersioning);
+    StagedCommit stagedCommit;
     if (exists) {
       Dataset ds = openDataset(readOptions);
-      stagedCommit =
-          StagedCommit.forExistingTable(
-              ds, arrowSchema, merged, namespace, tableIdList, managedVersioning);
+      stagedCommit = StagedCommit.forExistingTable(ds, arrowSchema, commitOptions);
       if (fileFormatVersion == null) {
         fileFormatVersion = ds.getLanceFileFormatVersion();
       }
     } else {
-      stagedCommit =
-          StagedCommit.forNewTable(
-              arrowSchema, location, merged, namespace, tableIdList, managedVersioning);
+      stagedCommit = StagedCommit.forNewTable(arrowSchema, location, commitOptions);
     }
     return createStagedDataset(
         readOptions,
@@ -1057,22 +1073,20 @@ public abstract class BaseLanceNamespaceSparkCatalog
 
     boolean exists = tableExistsAtPath(ident);
     Schema arrowSchema = LanceArrowUtils.toArrowSchema(processedSchema, "UTC", true);
+    final StagedCommitOptions commitOptions =
+        StagedCommitOptions.pathBased(
+            catalogConfig.getStorageOptions(), catalogConfig.isEnableStableRowIds(properties));
     StagedCommit stagedCommit;
     // Use specified file format version, or fall back to existing table's version
     String fileFormatVersion = catalogConfig.getFileFormatVersion(properties);
-
     if (exists) {
       Dataset ds = openDataset(readOptions);
-      stagedCommit =
-          StagedCommit.forExistingTable(
-              ds, arrowSchema, catalogConfig.getStorageOptions(), null, null, false);
+      stagedCommit = StagedCommit.forExistingTable(ds, arrowSchema, commitOptions);
       if (fileFormatVersion == null) {
         fileFormatVersion = ds.getLanceFileFormatVersion();
       }
     } else {
-      stagedCommit =
-          StagedCommit.forNewTable(
-              arrowSchema, datasetUri, catalogConfig.getStorageOptions(), null, null, false);
+      stagedCommit = StagedCommit.forNewTable(arrowSchema, datasetUri, commitOptions);
     }
     return createStagedDataset(
         readOptions,

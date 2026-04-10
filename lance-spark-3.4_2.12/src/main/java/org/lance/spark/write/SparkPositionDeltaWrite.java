@@ -48,6 +48,8 @@ import org.apache.spark.sql.connector.write.RequiresDistributionAndOrdering;
 import org.apache.spark.sql.connector.write.WriterCommitMessage;
 import org.apache.spark.sql.types.StructType;
 import org.roaringbitmap.RoaringBitmap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -56,10 +58,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
 
 public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistributionAndOrdering {
+  private static final Logger logger = LoggerFactory.getLogger(SparkPositionDeltaWrite.class);
+
   private final StructType sparkSchema;
   private final LanceSparkWriteOptions writeOptions;
 
@@ -83,7 +88,11 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
       Map<String, String> namespaceProperties,
       List<String> tableId) {
     this.sparkSchema = sparkSchema;
-    this.writeOptions = writeOptions;
+    try (Dataset ds = Utils.openDatasetBuilder(writeOptions).build()) {
+      this.writeOptions = writeOptions.withVersion(ds.version());
+      logger.debug(
+          "Resolved dataset version for position delta write: {}", this.writeOptions.getVersion());
+    }
     this.initialStorageOptions = initialStorageOptions;
     this.namespaceImpl = namespaceImpl;
     this.namespaceProperties = namespaceProperties;
@@ -142,6 +151,10 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
               });
 
       // Use SDK directly to update fragments
+      long version =
+          Objects.requireNonNull(
+              writeOptions.getVersion(),
+              "version must be set (resolved in SparkPositionDeltaWrite constructor)");
       try (Dataset dataset = Utils.openDatasetBuilder(writeOptions).build()) {
         Update update =
             Update.builder()
@@ -151,7 +164,7 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
                 .build();
 
         try (Transaction txn =
-                new Transaction.Builder().readVersion(dataset.version()).operation(update).build();
+                new Transaction.Builder().readVersion(version).operation(update).build();
             Dataset committed =
                 new CommitBuilder(dataset)
                     .writeParams(writeOptions.getStorageOptions())
@@ -324,7 +337,7 @@ public class SparkPositionDeltaWrite implements DeltaWrite, RequiresDistribution
     }
   }
 
-  private static class DeltaWriteTaskCommit implements WriterCommitMessage {
+  static class DeltaWriteTaskCommit implements WriterCommitMessage {
     private List<Long> removedFragmentIds;
     private List<FragmentMetadata> updatedFragments;
     private List<FragmentMetadata> newFragments;

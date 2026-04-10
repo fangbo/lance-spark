@@ -97,7 +97,7 @@ public class Utils {
       this.namespace = opts.getNamespace();
       this.tableId = opts.getTableId();
       this.catalogName = null;
-      this.version = null;
+      this.version = opts.getVersion();
       this.blockSize = null;
       this.indexCacheSize = null;
       this.metadataCacheSize = null;

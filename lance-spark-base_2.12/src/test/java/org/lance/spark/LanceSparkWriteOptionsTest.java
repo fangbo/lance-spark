@@ -31,6 +31,27 @@ public class LanceSparkWriteOptionsTest {
   private final String TEMP_URL = "file:///tmp/test";
 
   @Test
+  public void versionIsNullByDefault() {
+    LanceSparkWriteOptions opts = LanceSparkWriteOptions.from(TEMP_URL);
+    assertNull(opts.getVersion());
+  }
+
+  @Test
+  public void builderSetsVersion() {
+    LanceSparkWriteOptions opts =
+        LanceSparkWriteOptions.builder().datasetUri(TEMP_URL).version(7L).build();
+    assertEquals(7L, opts.getVersion());
+  }
+
+  @Test
+  public void withVersionCopiesOptions() {
+    LanceSparkWriteOptions base = LanceSparkWriteOptions.from(TEMP_URL);
+    LanceSparkWriteOptions pinned = base.withVersion(3L);
+    assertEquals(3L, pinned.getVersion());
+    assertNull(base.getVersion());
+  }
+
+  @Test
   public void testEnableStableRowIdsParsedFromOptions() {
     final Map<String, String> options = new HashMap<>();
     options.put("path", TEMP_URL);

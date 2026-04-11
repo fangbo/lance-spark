@@ -249,6 +249,10 @@ public class LanceDataset
     return namespaceProperties;
   }
 
+  public boolean getManagedVersioning() {
+    return managedVersioning;
+  }
+
   public String getFileFormatVersion() {
     return fileFormatVersion;
   }

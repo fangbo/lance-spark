@@ -55,12 +55,14 @@ public class LanceSparkWriteOptions implements Serializable {
   public static final String CONFIG_QUEUE_DEPTH = "queue_depth";
   public static final String CONFIG_BATCH_SIZE = "batch_size";
   public static final String CONFIG_ENABLE_STABLE_ROW_IDS = "enable_stable_row_ids";
+  public static final String CONFIG_USE_LARGE_VAR_TYPES = "use_large_var_types";
 
   private static final WriteMode DEFAULT_WRITE_MODE = WriteMode.APPEND;
   private static final boolean DEFAULT_USE_QUEUED_WRITE_BUFFER = false;
   private static final int DEFAULT_QUEUE_DEPTH = 8;
   // Changed from 512 to 8192 for better write performance consistency with read path
   private static final int DEFAULT_BATCH_SIZE = 8192;
+  private static final boolean DEFAULT_USE_LARGE_VAR_TYPES = false;
 
   private final String datasetUri;
   private final WriteMode writeMode;
@@ -74,6 +76,7 @@ public class LanceSparkWriteOptions implements Serializable {
   // Boxed so we can represent "unset" (null): when null, callers omit the flag and lance-core
   // inherits from the manifest (e.g. append without re-specifying). Staged commit uses primitives.
   private final Boolean enableStableRowIds;
+  private final boolean useLargeVarTypes;
   private final Map<String, String> storageOptions;
 
   /** The namespace for credential vending. Transient as LanceNamespace is not serializable. */
@@ -96,6 +99,7 @@ public class LanceSparkWriteOptions implements Serializable {
     this.queueDepth = builder.queueDepth;
     this.batchSize = builder.batchSize;
     this.enableStableRowIds = builder.enableStableRowIds;
+    this.useLargeVarTypes = builder.useLargeVarTypes;
     this.storageOptions = new HashMap<>(builder.storageOptions);
     this.namespace = builder.namespace;
     this.tableId = builder.tableId;
@@ -169,6 +173,10 @@ public class LanceSparkWriteOptions implements Serializable {
   /** Nullable when the write option was not specified (see field comment above). */
   public Boolean getEnableStableRowIds() {
     return enableStableRowIds;
+  }
+
+  public boolean isUseLargeVarTypes() {
+    return useLargeVarTypes;
   }
 
   public Map<String, String> getStorageOptions() {
@@ -279,6 +287,7 @@ public class LanceSparkWriteOptions implements Serializable {
     return useQueuedWriteBuffer == that.useQueuedWriteBuffer
         && queueDepth == that.queueDepth
         && batchSize == that.batchSize
+        && useLargeVarTypes == that.useLargeVarTypes
         && Objects.equals(datasetUri, that.datasetUri)
         && writeMode == that.writeMode
         && Objects.equals(maxRowsPerFile, that.maxRowsPerFile)
@@ -304,6 +313,7 @@ public class LanceSparkWriteOptions implements Serializable {
         queueDepth,
         batchSize,
         enableStableRowIds,
+        useLargeVarTypes,
         storageOptions,
         tableId,
         version);
@@ -321,6 +331,7 @@ public class LanceSparkWriteOptions implements Serializable {
     private int queueDepth = DEFAULT_QUEUE_DEPTH;
     private int batchSize = DEFAULT_BATCH_SIZE;
     private Boolean enableStableRowIds;
+    private boolean useLargeVarTypes = DEFAULT_USE_LARGE_VAR_TYPES;
     private Map<String, String> storageOptions = new HashMap<>();
     private LanceNamespace namespace;
     private List<String> tableId;
@@ -375,6 +386,11 @@ public class LanceSparkWriteOptions implements Serializable {
 
     public Builder enableStableRowIds(Boolean enableStableRowIds) {
       this.enableStableRowIds = enableStableRowIds;
+      return this;
+    }
+
+    public Builder useLargeVarTypes(boolean useLargeVarTypes) {
+      this.useLargeVarTypes = useLargeVarTypes;
       return this;
     }
 
@@ -436,6 +452,9 @@ public class LanceSparkWriteOptions implements Serializable {
       }
       if (options.containsKey(CONFIG_ENABLE_STABLE_ROW_IDS)) {
         this.enableStableRowIds = Boolean.parseBoolean(options.get(CONFIG_ENABLE_STABLE_ROW_IDS));
+      }
+      if (options.containsKey(CONFIG_USE_LARGE_VAR_TYPES)) {
+        this.useLargeVarTypes = Boolean.parseBoolean(options.get(CONFIG_USE_LARGE_VAR_TYPES));
       }
       return this;
     }

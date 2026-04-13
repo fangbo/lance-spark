@@ -138,7 +138,6 @@ public class LanceScanBuilder
 
     // Get statistics from manifest summary before closing dataset
     ManifestSummary summary = getOrOpenDataset().getVersion().getManifestSummary();
-    LanceStatistics statistics = new LanceStatistics(summary);
 
     // Collect all columns that need zonemap stats: filter columns + partition column (if declared).
     Set<String> columnsToLoad = extractReferencedColumns(pushedFilters);
@@ -165,17 +164,47 @@ public class LanceScanBuilder
             partitionColumn,
             TABLE_OPT_PARTITION_COLUMNS);
       } else {
-        java.util.Optional<Map<Integer, Comparable<?>>> partValues =
-            ZonemapFragmentPruner.computeFragmentPartitionValues(zonemapStats.get(partitionColumn));
-        if (partValues.isPresent()) {
-          partitionInfo =
-              new ZonemapFragmentPruner.PartitionInfo(partitionColumn, partValues.get());
+        Map<Integer, Comparable<?>> partValues =
+            ZonemapFragmentPruner.computeFragmentPartitionValues(zonemapStats.get(partitionColumn))
+                .orElse(null);
+        if (partValues != null) {
+          partitionInfo = new ZonemapFragmentPruner.PartitionInfo(partitionColumn, partValues);
           LOG.info(
               "Detected partition-compatible column '{}' with {} fragments",
               partitionColumn,
-              partValues.get().size());
+              partValues.size());
         }
       }
+    }
+
+    // Pre-compute fragment pruning so we can (a) estimate post-pruning statistics for
+    // JoinSelection (BroadcastHashJoin vs SortMergeJoin) and (b) pass the cached result
+    // to LanceScan to avoid re-computing during planInputPartitions().
+    Set<Integer> survivingFragmentIds = null;
+    if (pushedFilters.length > 0 && !zonemapStats.isEmpty()) {
+      survivingFragmentIds =
+          ZonemapFragmentPruner.pruneFragments(pushedFilters, zonemapStats).orElse(null);
+    }
+
+    LanceStatistics statistics;
+    if (survivingFragmentIds != null) {
+      statistics =
+          LanceStatistics.estimatePostPruning(
+              summary.getTotalRows(),
+              summary.getTotalFilesSize(),
+              summary.getTotalFragments(),
+              survivingFragmentIds.size());
+      LOG.debug(
+          "Estimated post-pruning statistics: {} of {} fragments survive,"
+              + " estimatedSize={}, estimatedRows={} (full: size={}, rows={})",
+          survivingFragmentIds.size(),
+          summary.getTotalFragments(),
+          statistics.sizeInBytes(),
+          statistics.numRows(),
+          summary.getTotalFilesSize(),
+          summary.getTotalRows());
+    } else {
+      statistics = new LanceStatistics(summary);
     }
 
     // Close the lazily opened dataset - it's no longer needed after build
@@ -193,6 +222,7 @@ public class LanceScanBuilder
         pushedFilters,
         statistics,
         zonemapStats,
+        survivingFragmentIds,
         partitionInfo,
         initialStorageOptions,
         namespaceImpl,
@@ -349,7 +379,7 @@ public class LanceScanBuilder
     }
 
     if (!result.isEmpty()) {
-      LOG.info("Loaded zonemap stats for {} columns: {}", result.size(), result.keySet());
+      LOG.debug("Loaded zonemap stats for {} columns: {}", result.size(), result.keySet());
     }
 
     return result;

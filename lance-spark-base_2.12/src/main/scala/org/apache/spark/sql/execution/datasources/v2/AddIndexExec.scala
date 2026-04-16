@@ -85,10 +85,11 @@ case class AddIndexExec(
     val uuid = UUID.randomUUID()
     val indexType = IndexUtils.buildIndexType(method)
 
-    val indexBuildResult =
-      createIndexJob(lanceDataset, readOptions, uuid.toString, fragmentIds).run()
-
     val dataset = Utils.openDatasetBuilder(readOptions).build()
+
+    val indexBuildResult =
+      createIndexJob(dataset, lanceDataset, readOptions, uuid.toString, fragmentIds).run()
+
     try {
       // Merge index metadata after all fragments are indexed
       dataset.mergeIndexMetadata(uuid.toString, indexType, Optional.empty())
@@ -148,6 +149,7 @@ case class AddIndexExec(
   }
 
   private def createIndexJob(
+      dataset: Dataset,
       lanceDataset: LanceDataset,
       readOptions: LanceSparkReadOptions,
       uuid: String,
@@ -179,7 +181,8 @@ case class AddIndexExec(
               nsImpl,
               nsProps,
               tableId,
-              initialStorageOpts)
+              initialStorageOpts,
+              dataset.getVersion.getManifestSummary.getTotalRows)
 
           case Some("fragment") | None =>
             new FragmentBasedIndexJob(
@@ -362,6 +365,7 @@ case class FragmentIndexTask(
  * @param nsProps            Optional namespace properties for credential vending
  * @param tableId            Optional table identifier for credential vending
  * @param initialStorageOpts Optional initial storage options for the dataset
+ * @param totalRows          Total number of rows in the dataset
  */
 class RangeBasedBTreeIndexJob(
     addIndexExec: AddIndexExec,
@@ -370,9 +374,11 @@ class RangeBasedBTreeIndexJob(
     nsImpl: Option[String],
     nsProps: Option[Map[String, String]],
     tableId: Option[List[String]],
-    initialStorageOpts: Option[Map[String, String]]) extends IndexJob {
+    initialStorageOpts: Option[Map[String, String]],
+    totalRows: Long) extends IndexJob {
 
   private val VALUE_COLUMN_NAME = "value"
+  private val DEFAULT_ROWS_PER_RANGE = 1000000L
 
   override def run(): IndexBuildResult = {
     if (addIndexExec.columns.size != 1) {
@@ -402,11 +408,15 @@ class RangeBasedBTreeIndexJob(
       df.select(df.col(columns.head).as(VALUE_COLUMN_NAME), df.col(LanceDataset.ROW_ID_COLUMN.name))
 
     // Repartition the data to numRanges and sort by indexed column
+    val rowsPerRange = addIndexExec.args.find(_.name == "rows_per_range").map(
+      _.value.asInstanceOf[Long]).getOrElse(DEFAULT_ROWS_PER_RANGE)
+    val numRange = Math.max(1L, totalRows / rowsPerRange.longValue())
+
     val rangeDf = selectDf
       .repartitionByRange(
-        session.sessionState.conf.numShufflePartitions,
+        numRange.intValue(),
         selectDf.col(VALUE_COLUMN_NAME).asc)
-      .sortWithinPartitions(VALUE_COLUMN_NAME)
+      .sortWithinPartitions(selectDf.col(VALUE_COLUMN_NAME).asc)
 
     val indexBuilder = RangeBTreeIndexBuilder(
       encode(readOptions),

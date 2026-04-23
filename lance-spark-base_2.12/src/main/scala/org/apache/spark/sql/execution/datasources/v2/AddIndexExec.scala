@@ -15,7 +15,7 @@ package org.apache.spark.sql.execution.datasources.v2
 
 import org.apache.arrow.c.{ArrowArrayStream, Data}
 import org.apache.arrow.vector.VectorSchemaRoot
-import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
+import org.apache.arrow.vector.ipc.ArrowReader
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
 import org.apache.spark.sql.catalyst.plans.logical.{AddIndexOutputType, LanceNamedArgument}
@@ -33,8 +33,8 @@ import org.lance.operation.{CreateIndex => AddIndexOperation}
 import org.lance.spark.{BaseLanceNamespaceSparkCatalog, LanceDataset, LanceRuntime, LanceSparkReadOptions}
 import org.lance.spark.arrow.LanceArrowWriter
 import org.lance.spark.utils.{CloseableUtil, Utils}
+import org.lance.spark.write.SingleBatchArrowReader
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
 import java.util.{Collections, Optional, UUID}
 
 import scala.collection.JavaConverters._
@@ -455,28 +455,14 @@ case class RangeBTreeIndexBuilder(
       return Iterator.empty
     }
 
-    // Serialize the arrow stream to byte array
-    val out = new ByteArrayOutputStream()
-    val streamWriter = new ArrowStreamWriter(data, null, out)
-    try {
-      streamWriter.start()
-      streamWriter.writeBatch()
-      streamWriter.end()
-    } finally {
-      CloseableUtil.closeQuietly(streamWriter)
-      CloseableUtil.closeQuietly(data)
-    }
-
-    val arrowData = out.toByteArray()
-    val in = new ByteArrayInputStream(arrowData)
-
-    // Export data to lance
-    val reader = new ArrowStreamReader(in, allocator)
-    val stream = ArrowArrayStream.allocateNew(allocator)
-
+    var stream: ArrowArrayStream = null
+    var reader: ArrowReader = null
     var dataset: Dataset = null
 
     try {
+      stream = ArrowArrayStream.allocateNew(allocator)
+      reader = new SingleBatchArrowReader(allocator, data)
+
       dataset = Utils.openDatasetBuilder(
         decode[LanceSparkReadOptions](encodedReadOptions))
         .initialStorageOptions(initialStorageOptions.map(_.asJava).orNull)
@@ -505,10 +491,8 @@ case class RangeBTreeIndexBuilder(
     } finally {
       CloseableUtil.closeQuietly(stream)
       CloseableUtil.closeQuietly(reader)
-
-      if (dataset != null) {
-        CloseableUtil.closeQuietly(dataset)
-      }
+      CloseableUtil.closeQuietly(data)
+      CloseableUtil.closeQuietly(dataset)
     }
 
     Iterator.empty

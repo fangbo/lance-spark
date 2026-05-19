@@ -150,6 +150,7 @@ public class LanceBatchWrite implements BatchWrite {
         Arrays.stream(messages)
             .map(m -> (TaskCommit) m)
             .map(TaskCommit::getFragments)
+            .map(LanceDataWriter::stripRowIdMeta)
             .flatMap(List::stream)
             .collect(Collectors.toList());
 
@@ -193,7 +194,10 @@ public class LanceBatchWrite implements BatchWrite {
         if (managedVersioning) {
           LanceNamespace namespace =
               LanceRuntime.getOrCreateNamespace(namespaceImpl, namespaceProperties);
-          commitBuilder.namespaceClient(namespace).tableId(tableId);
+          commitBuilder
+              .namespaceClient(namespace)
+              .tableId(tableId)
+              .namespaceClientManagedVersioning(true);
         }
         try (Transaction txn =
                 new Transaction.Builder().readVersion(version).operation(operation).build();

@@ -122,6 +122,8 @@ object LanceArrowWriter {
       case (_: DayTimeIntervalType, vector: DurationVector) => new DurationWriter(vector)
       case (CalendarIntervalType, vector: IntervalMonthDayNanoVector) =>
         new IntervalMonthDayNanoWriter(vector)
+      case (udt: UserDefinedType[_], _) =>
+        createFieldWriter(vector, udt.sqlType, metadata)
       case (dt, _) =>
         throw new UnsupportedOperationException(s"Unsupported data type: $dt")
     }

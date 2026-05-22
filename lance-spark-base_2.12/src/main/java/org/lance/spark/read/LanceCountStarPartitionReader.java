@@ -106,6 +106,7 @@ public class LanceCountStarPartitionReader implements PartitionReader<ColumnarBa
             metricsTracker.addNumRowsScanned(rowCount);
           }
         }
+        metricsTracker.addScanStats(scanner.getStats());
       } catch (Exception e) {
         throw new RuntimeException("Failed to scan fragment " + fragmentIds, e);
       }

@@ -13,6 +13,7 @@
  */
 package org.lance.spark;
 
+import org.lance.memwal.ShardingSpec;
 import org.lance.spark.write.StagedCommit;
 
 import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
@@ -67,7 +68,8 @@ public class LanceNamespaceSparkCatalog extends BaseLanceNamespaceSparkCatalog {
       Map<String, String> namespaceProperties,
       boolean managedVersioning,
       String fileFormatVersion,
-      Map<String, String> tableProperties) {
+      Map<String, String> tableProperties,
+      ShardingSpec shardingSpec) {
     return new LancePositionDeltaDataset(
         readOptions,
         sparkSchema,
@@ -76,7 +78,8 @@ public class LanceNamespaceSparkCatalog extends BaseLanceNamespaceSparkCatalog {
         namespaceProperties,
         managedVersioning,
         fileFormatVersion,
-        tableProperties);
+        tableProperties,
+        shardingSpec);
   }
 
   @Override
@@ -89,7 +92,8 @@ public class LanceNamespaceSparkCatalog extends BaseLanceNamespaceSparkCatalog {
       boolean managedVersioning,
       StagedCommit stagedCommit,
       String fileFormatVersion,
-      Map<String, String> tableProperties) {
+      Map<String, String> tableProperties,
+      ShardingSpec shardingSpec) {
     return new LancePositionDeltaDataset(
         readOptions,
         sparkSchema,
@@ -99,6 +103,7 @@ public class LanceNamespaceSparkCatalog extends BaseLanceNamespaceSparkCatalog {
         managedVersioning,
         stagedCommit,
         fileFormatVersion,
-        tableProperties);
+        tableProperties,
+        shardingSpec);
   }
 }

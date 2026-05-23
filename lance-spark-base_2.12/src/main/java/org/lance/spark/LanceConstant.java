@@ -35,7 +35,4 @@ public class LanceConstant {
    * consumed by {@code LanceDataset.newWriteBuilder}; not a user-facing option.
    */
   public static final String BLOB_SOURCE_CONTEXTS_KEY = "__lance_blob_source_contexts";
-
-  /** Table property that declares the partition column(s) for SPJ. */
-  public static final String TABLE_OPT_PARTITION_COLUMNS = "lance.partition.columns";
 }

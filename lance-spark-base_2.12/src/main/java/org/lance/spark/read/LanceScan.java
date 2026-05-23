@@ -17,12 +17,12 @@ import org.lance.index.scalar.ZoneStats;
 import org.lance.ipc.ColumnOrdering;
 import org.lance.spark.LanceSparkReadOptions;
 import org.lance.spark.read.metric.LanceCustomMetrics;
+import org.lance.spark.sharding.SparkLanceShardingUtils;
 import org.lance.spark.utils.Optional;
 
 import org.apache.arrow.util.Preconditions;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.expressions.Expression;
-import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.aggregate.AggregateFunc;
 import org.apache.spark.sql.connector.expressions.aggregate.Aggregation;
 import org.apache.spark.sql.connector.expressions.aggregate.CountStar;
@@ -92,12 +92,11 @@ public class LanceScan
   /** Number of partitions after pruning, set during {@link #planInputPartitions()}. */
   private transient int numPartitions = -1;
 
-  /**
-   * Partition info detected from zonemap stats. When present, enables storage-partitioned joins
-   * (SPJ) by reporting the partition column as the output partitioning key instead of {@code
-   * _fragid}. Null when no partition-compatible column is detected.
-   */
-  private final ZonemapFragmentPruner.PartitionInfo partitionInfo;
+  /** Active Spark partition expression detected from sharding zonemap stats. */
+  private final Expression activeShardingExpression;
+
+  /** Map from fragment ID to sharding key value. Null when no sharding is detected. */
+  private final java.util.Map<Integer, Object> fragmentShardingKeys;
 
   /**
    * Initial storage options fetched from namespace.describeTable() on the driver. These are passed
@@ -122,7 +121,8 @@ public class LanceScan
       LanceStatistics statistics,
       java.util.Map<String, List<ZoneStats>> zonemapStats,
       Set<Integer> survivingFragmentIds,
-      ZonemapFragmentPruner.PartitionInfo partitionInfo,
+      Expression activeShardingExpression,
+      java.util.Map<Integer, Object> fragmentShardingKeys,
       java.util.Map<String, String> initialStorageOptions,
       String namespaceImpl,
       java.util.Map<String, String> namespaceProperties) {
@@ -140,7 +140,8 @@ public class LanceScan
     this.statistics = statistics;
     this.zonemapStats = zonemapStats != null ? zonemapStats : Collections.emptyMap();
     this.cachedSurvivingFragmentIds = survivingFragmentIds;
-    this.partitionInfo = partitionInfo;
+    this.activeShardingExpression = activeShardingExpression;
+    this.fragmentShardingKeys = fragmentShardingKeys;
     this.initialStorageOptions = initialStorageOptions;
     this.namespaceImpl = namespaceImpl;
     this.namespaceProperties = namespaceProperties;
@@ -180,9 +181,12 @@ public class LanceScan
                 i -> {
                   LanceSplit split = finalSplits.get(i);
                   InternalRow partKeyRow = null;
-                  if (partitionInfo != null) {
+                  if (activeShardingExpression != null && fragmentShardingKeys != null) {
                     int fragId = split.getFragments().get(0);
-                    partKeyRow = partitionInfo.partitionKeyForFragment(fragId);
+                    Object key = fragmentShardingKeys.get(fragId);
+                    if (key != null) {
+                      partKeyRow = SparkLanceShardingUtils.partitionKeyRow(key);
+                    }
                   }
                   return new LanceInputPartition(
                       schema,
@@ -361,24 +365,18 @@ public class LanceScan
   /**
    * Reports the output partitioning to Spark's optimizer.
    *
-   * <p>When a partition-compatible column is detected via zonemap stats (every fragment has a
-   * single distinct value for that column), we report the data column as the partition key. This
-   * enables Spark's storage-partitioned join (SPJ) protocol — allowing shuffle-free joins between
-   * Lance tables or between Lance and other data sources (e.g., Iceberg) that share the same
-   * partition column.
+   * <p>When a sharding-compatible column is detected via zonemap stats (every fragment has a single
+   * distinct value for that column), we report the data column as the partition key. This enables
+   * Spark's storage-partitioned join (SPJ) protocol for Lance tables and other data sources that
+   * share the same sharding column.
    *
-   * <p>When no partition column is detected, returns {@link UnknownPartitioning}.
+   * <p>When no sharding column is detected, returns {@link UnknownPartitioning}.
    */
   @Override
   public Partitioning outputPartitioning() {
-    if (partitionInfo != null) {
-      // Use partition info fragment count — available before
-      // planInputPartitions() is called. This allows
-      // V2ScanPartitioningAndOrdering to see the partitioning
-      // early enough for SPJ.
-      int partCount =
-          numPartitions >= 0 ? numPartitions : partitionInfo.getFragmentPartitionValues().size();
-      Expression[] keys = new Expression[] {FieldReference.apply(partitionInfo.getColumnName())};
+    if (activeShardingExpression != null && fragmentShardingKeys != null) {
+      int partCount = numPartitions >= 0 ? numPartitions : fragmentShardingKeys.size();
+      Expression[] keys = new Expression[] {activeShardingExpression};
       return new KeyGroupedPartitioning(keys, partCount);
     }
     return new UnknownPartitioning(numPartitions >= 0 ? numPartitions : 0);

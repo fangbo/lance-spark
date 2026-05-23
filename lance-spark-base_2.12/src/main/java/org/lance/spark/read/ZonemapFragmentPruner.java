@@ -15,8 +15,6 @@ package org.lance.spark.read;
 
 import org.lance.index.scalar.ZoneStats;
 
-import org.apache.spark.sql.catalyst.InternalRow;
-import org.apache.spark.sql.catalyst.expressions.GenericInternalRow;
 import org.apache.spark.sql.connector.expressions.Expression;
 import org.apache.spark.sql.connector.expressions.Literal;
 import org.apache.spark.sql.connector.expressions.NamedReference;
@@ -28,10 +26,8 @@ import org.apache.spark.unsafe.types.UTF8String;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -356,89 +352,5 @@ public final class ZonemapFragmentPruner {
     LESS_THAN_OR_EQUAL,
     GREATER_THAN,
     GREATER_THAN_OR_EQUAL
-  }
-
-  /**
-   * Result of partition detection: the partition column name and a map from fragment ID to the
-   * partition value for that fragment.
-   */
-  public static final class PartitionInfo implements Serializable {
-    private static final long serialVersionUID = 1L;
-
-    private final String columnName;
-    private final Map<Integer, Comparable<?>> fragmentPartitionValues;
-
-    public PartitionInfo(String columnName, Map<Integer, Comparable<?>> fragmentPartitionValues) {
-      this.columnName = columnName;
-      this.fragmentPartitionValues = Collections.unmodifiableMap(fragmentPartitionValues);
-    }
-
-    public String getColumnName() {
-      return columnName;
-    }
-
-    public Map<Integer, Comparable<?>> getFragmentPartitionValues() {
-      return fragmentPartitionValues;
-    }
-
-    /**
-     * Returns a partition key {@link InternalRow} for the given fragment ID. The row contains a
-     * single column with the partition value, converted to a Spark-compatible type.
-     */
-    public InternalRow partitionKeyForFragment(int fragmentId) {
-      Comparable<?> value = fragmentPartitionValues.get(fragmentId);
-      Object sparkValue = toSparkValue(value);
-      return new GenericInternalRow(new Object[] {sparkValue});
-    }
-
-    private static Object toSparkValue(Comparable<?> value) {
-      if (value == null) {
-        return null;
-      }
-      if (value instanceof String) {
-        return UTF8String.fromString((String) value);
-      }
-      return value;
-    }
-  }
-
-  /**
-   * Checks whether zonemap zones are partitionable — i.e., every fragment has exactly one distinct
-   * value (all zones have {@code min == max} with the same value per fragment).
-   *
-   * @param zones zonemap zones for a single column
-   * @return map from fragment ID to partition value, or empty if zones are not partitionable
-   */
-  static Optional<Map<Integer, Comparable<?>>> computeFragmentPartitionValues(
-      List<ZoneStats> zones) {
-
-    if (zones == null || zones.isEmpty()) {
-      return Optional.empty();
-    }
-
-    Map<Integer, Comparable<?>> result = new HashMap<>();
-
-    for (ZoneStats zone : zones) {
-      Comparable<?> min = zone.getMin();
-      Comparable<?> max = zone.getMax();
-
-      if (min == null || max == null) {
-        return Optional.empty();
-      }
-
-      if (!min.equals(max)) {
-        return Optional.empty();
-      }
-
-      int fragId = zone.getFragmentId();
-      Comparable<?> existing = result.get(fragId);
-      if (existing != null && !existing.equals(min)) {
-        return Optional.empty();
-      }
-
-      result.put(fragId, min);
-    }
-
-    return Optional.of(result);
   }
 }

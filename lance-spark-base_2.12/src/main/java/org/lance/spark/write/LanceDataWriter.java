@@ -13,13 +13,19 @@
  */
 package org.lance.spark.write;
 
+import org.lance.Dataset;
 import org.lance.Fragment;
 import org.lance.FragmentMetadata;
 import org.lance.WriteParams;
+import org.lance.memwal.MemWalIndexDetails;
+import org.lance.memwal.ShardingField;
+import org.lance.memwal.ShardingSpec;
 import org.lance.spark.LanceRuntime;
 import org.lance.spark.LanceSparkWriteOptions;
+import org.lance.spark.sharding.SparkLanceShardingUtils;
 import org.lance.spark.utils.BlobReferenceResolver;
 import org.lance.spark.utils.BlobSourceContext;
+import org.lance.spark.utils.Utils;
 
 import org.apache.arrow.c.ArrowArrayStream;
 import org.apache.arrow.c.Data;
@@ -27,17 +33,19 @@ import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.write.DataWriter;
 import org.apache.spark.sql.connector.write.DataWriterFactory;
 import org.apache.spark.sql.connector.write.WriterCommitMessage;
-import org.apache.spark.sql.types.DataType;
-import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-import org.apache.spark.unsafe.types.UTF8String;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
@@ -46,9 +54,10 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 public class LanceDataWriter implements DataWriter<InternalRow> {
+  private static final Logger LOG = LoggerFactory.getLogger(LanceDataWriter.class);
+
   private final Supplier<BufferAndTask> bufferTaskFactory;
-  private final int[] partitionColumnIndices;
-  private final DataType[] partitionColumnTypes;
+  private final ShardingBatchKeyEvaluator shardingKeyEvaluator;
   private final List<FragmentMetadata> completedFragments = new ArrayList<>();
 
   /**
@@ -61,21 +70,14 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
   private ArrowBatchWriteBuffer writeBuffer;
   private FutureTask<List<FragmentMetadata>> fragmentCreationTask;
   private Thread fragmentCreationThread;
-  private Object[] lastKey;
+  private Object lastKey;
   private boolean hasRowsInCurrentFragment;
 
   public LanceDataWriter(
       ArrowBatchWriteBuffer writeBuffer,
       FutureTask<List<FragmentMetadata>> fragmentCreationTask,
       Thread fragmentCreationThread) {
-    this(
-        writeBuffer,
-        fragmentCreationTask,
-        fragmentCreationThread,
-        null,
-        new int[0],
-        new DataType[0],
-        null);
+    this(writeBuffer, fragmentCreationTask, fragmentCreationThread, null, null, null);
   }
 
   LanceDataWriter(
@@ -83,81 +85,46 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
       FutureTask<List<FragmentMetadata>> fragmentCreationTask,
       Thread fragmentCreationThread,
       Supplier<BufferAndTask> bufferTaskFactory,
-      int[] partitionColumnIndices,
-      DataType[] partitionColumnTypes,
+      ShardingBatchKeyEvaluator shardingKeyEvaluator,
       BlobReferenceResolver blobResolver) {
     this.writeBuffer = writeBuffer;
     this.fragmentCreationThread = fragmentCreationThread;
     this.fragmentCreationTask = fragmentCreationTask;
     this.bufferTaskFactory = bufferTaskFactory;
-    this.partitionColumnIndices = partitionColumnIndices;
-    this.partitionColumnTypes = partitionColumnTypes;
+    this.shardingKeyEvaluator = shardingKeyEvaluator;
     this.blobResolver = blobResolver;
   }
 
   @Override
   public void write(InternalRow record) throws IOException {
-    if (partitionColumnIndices.length > 0) {
-      if (!hasRowsInCurrentFragment) {
-        captureKey(record);
-      } else if (!rowMatchesLastKey(record)) {
-        rollFragment();
-        captureKey(record);
-      }
+    if (shardingKeyEvaluator != null) {
+      shardingKeyEvaluator.write(record, this::writePartitionedRow);
+      return;
     }
     writeBuffer.write(record);
     hasRowsInCurrentFragment = true;
   }
 
-  /** Compares the row's partition values against {@link #lastKey} without allocating. */
-  private boolean rowMatchesLastKey(InternalRow row) {
-    for (int k = 0; k < partitionColumnIndices.length; k++) {
-      int idx = partitionColumnIndices[k];
-      Object prev = lastKey[k];
-      if (row.isNullAt(idx)) {
-        if (prev != null) return false;
-      } else {
-        if (prev == null) return false;
-        if (!prev.equals(row.get(idx, partitionColumnTypes[k]))) return false;
-      }
+  private void writePartitionedRow(InternalRow row, Object key) throws IOException {
+    if (!hasRowsInCurrentFragment) {
+      lastKey = key;
+    } else if (!Objects.equals(key, lastKey)) {
+      rollFragment();
+      lastKey = key;
     }
-    return true;
+    writeBuffer.write(row);
+    hasRowsInCurrentFragment = true;
   }
 
-  /**
-   * Snapshots the row's partition values into {@link #lastKey}. Only called on the first row of a
-   * fragment, so the per-row hot path stays allocation-free.
-   */
-  private void captureKey(InternalRow row) {
-    if (lastKey == null) {
-      lastKey = new Object[partitionColumnIndices.length];
-    }
-    for (int k = 0; k < partitionColumnIndices.length; k++) {
-      int idx = partitionColumnIndices[k];
-      if (row.isNullAt(idx)) {
-        lastKey[k] = null;
-      } else {
-        Object value = row.get(idx, partitionColumnTypes[k]);
-        // UTF8String wraps a pointer into the row buffer, which may be reused
-        // across calls — snapshot the bytes so the key stays stable.
-        lastKey[k] = value instanceof UTF8String ? ((UTF8String) value).clone() : value;
-      }
-    }
-  }
-
-  /**
-   * Closes the current fragment stream, collects its metadata, and spins up a fresh buffer + task
-   * so subsequent rows land in a new fragment. Called at each partition-value transition.
-   */
   private void rollFragment() throws IOException {
     writeBuffer.setFinished();
     try {
       completedFragments.addAll(stripRowIdMeta(fragmentCreationTask.get()));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while rolling fragment on partition boundary", e);
+      throw new IOException("Interrupted while rolling fragment", e);
     } catch (ExecutionException e) {
-      throw new IOException("Exception rolling fragment on partition boundary", e);
+      throw new IOException("Exception rolling fragment", e);
     }
     writeBuffer.close();
 
@@ -171,6 +138,9 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
 
   @Override
   public WriterCommitMessage commit() throws IOException {
+    if (shardingKeyEvaluator != null) {
+      shardingKeyEvaluator.flush(this::writePartitionedRow);
+    }
     writeBuffer.setFinished();
 
     try {
@@ -178,7 +148,7 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
       return new LanceBatchWrite.TaskCommit(new ArrayList<>(completedFragments));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while waiting for fragment creation thread to finish", e);
+      throw new IOException("Interrupted waiting for fragment creation", e);
     } catch (ExecutionException e) {
       throw new IOException("Exception in fragment creation thread", e);
     }
@@ -186,21 +156,15 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
 
   @Override
   public void abort() throws IOException {
-    // Signal the write buffer that no more data will be produced.
-    // This unblocks the fragment creation thread's consumer side
-    // (which reads from the buffer via ArrowReader interface),
-    // preventing a deadlock where the consumer waits for more data
-    // while we wait for the consumer to finish.
     writeBuffer.setFinished();
     fragmentCreationThread.interrupt();
     try {
-      // Have a timeout to avoid hanging in native method indefinitely
       fragmentCreationTask.get(5, TimeUnit.MINUTES);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IOException("Interrupted while waiting for fragment creation thread to finish", e);
+      throw new IOException("Interrupted waiting for fragment creation", e);
     } catch (ExecutionException | TimeoutException e) {
-      throw new IOException("Failed to abort the fragment creation thread", e);
+      throw new IOException("Failed to abort fragment creation", e);
     }
     close();
   }
@@ -208,12 +172,18 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
   @Override
   public void close() throws IOException {
     try {
-      writeBuffer.close();
+      if (shardingKeyEvaluator != null) {
+        shardingKeyEvaluator.close();
+      }
     } finally {
-      // Release any source datasets opened to resolve blob references. Spark always calls close()
-      // (after commit, and after abort), so this is the single teardown point for the resolver.
-      if (blobResolver != null) {
-        blobResolver.close();
+      try {
+        writeBuffer.close();
+      } finally {
+        // Release any source datasets opened to resolve blob references. Spark always calls close()
+        // (after commit, and after abort), so this is the single teardown point for the resolver.
+        if (blobResolver != null) {
+          blobResolver.close();
+        }
       }
     }
   }
@@ -251,19 +221,11 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
   public static class WriterFactory implements DataWriterFactory {
     private final LanceSparkWriteOptions writeOptions;
     private final StructType schema;
-
-    /**
-     * Initial storage options fetched from namespace.describeTable() on the driver. These are
-     * passed to workers so they can reuse the credentials without calling describeTable again.
-     */
     private final Map<String, String> initialStorageOptions;
-
-    /** Namespace configuration for credential refresh on workers. */
     private final String namespaceImpl;
-
     private final Map<String, String> namespaceProperties;
     private final List<String> tableId;
-    private final List<String> partitionColumns;
+    private final ShardingSpecSnapshot shardingSpec;
 
     /**
      * Per-source blob credential/open contexts keyed by source dataset URI, captured on the driver
@@ -287,7 +249,7 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
           namespaceImpl,
           namespaceProperties,
           tableId,
-          Collections.emptyList(),
+          null,
           Collections.emptyMap());
     }
 
@@ -298,7 +260,7 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
         String namespaceImpl,
         Map<String, String> namespaceProperties,
         List<String> tableId,
-        List<String> partitionColumns,
+        ShardingSpec shardingSpec,
         Map<String, BlobSourceContext> blobSourceContexts) {
       // Everything passed to writer factory should be serializable
       this.schema = schema;
@@ -307,7 +269,10 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
       this.namespaceImpl = namespaceImpl;
       this.namespaceProperties = namespaceProperties;
       this.tableId = tableId;
-      this.partitionColumns = partitionColumns == null ? Collections.emptyList() : partitionColumns;
+      this.shardingSpec =
+          SparkLanceShardingUtils.isEmpty(shardingSpec)
+              ? null
+              : ShardingSpecSnapshot.from(shardingSpec);
       this.blobSourceContexts =
           blobSourceContexts == null ? Collections.emptyMap() : blobSourceContexts;
     }
@@ -343,14 +308,18 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
               return Fragment.create(writeOptions.getDatasetUri(), arrowStream, params);
             }
           };
-      FutureTask<List<FragmentMetadata>> fragmentCreationTask =
-          writeBuffer.createTrackedTask(fragmentCreator);
-      Thread fragmentCreationThread = new Thread(fragmentCreationTask);
-      return new BufferAndTask(writeBuffer, fragmentCreationTask, fragmentCreationThread);
+      FutureTask<List<FragmentMetadata>> task = writeBuffer.createTrackedTask(fragmentCreator);
+      Thread thread = new Thread(task);
+      return new BufferAndTask(writeBuffer, task, thread);
     }
 
     @Override
     public DataWriter<InternalRow> createWriter(int partitionId, long taskId) {
+      ShardingBatchKeyEvaluator shardingKeyEvaluator =
+          shardingSpec == null
+              ? null
+              : new ShardingBatchKeyEvaluator(schema, writeOptions, shardingBinding());
+
       // One resolver per write task, shared across all batches and fragments (rolled by
       // bufferTaskFactory) and closed when the LanceDataWriter is closed. Always created so blob
       // references can be resolved even without captured contexts (it falls back to open-by-URI).
@@ -358,54 +327,115 @@ public class LanceDataWriter implements DataWriter<InternalRow> {
       BufferAndTask initial = buildBufferAndTask(resolver);
       initial.thread.start();
 
-      int[] indices = resolvePartitionColumnIndices();
-      DataType[] types = resolvePartitionColumnTypes(indices);
-
       return new LanceDataWriter(
           initial.buffer,
           initial.task,
           initial.thread,
           () -> buildBufferAndTask(resolver),
-          indices,
-          types,
+          shardingKeyEvaluator,
           resolver);
     }
 
-    private int[] resolvePartitionColumnIndices() {
-      if (partitionColumns.isEmpty()) {
-        return new int[0];
-      }
-      String[] names = schema.fieldNames();
-      int[] indices = new int[partitionColumns.size()];
-      for (int i = 0; i < partitionColumns.size(); i++) {
-        String col = partitionColumns.get(i);
-        int found = -1;
-        for (int j = 0; j < names.length; j++) {
-          if (names[j].equals(col)) {
-            found = j;
-            break;
-          }
+    private ShardingBatchKeyEvaluator.ShardingBinding shardingBinding() {
+      try (Dataset dataset =
+          Utils.openDatasetBuilder(
+                  writeOptions.toBuilder()
+                      .storageOptions(
+                          LanceRuntime.mergeStorageOptions(
+                              writeOptions.getStorageOptions(), initialStorageOptions))
+                      .build())
+              .build()) {
+        Optional<MemWalIndexDetails> details = dataset.memWalIndexDetails();
+        if (details.isPresent() && !details.get().shardingSpecs().isEmpty()) {
+          return new ShardingBatchKeyEvaluator.ShardingBinding(
+              details.get().shardingSpecs().get(0), dataset.getLanceSchema());
         }
-        if (found < 0) {
-          throw new IllegalArgumentException(
-              "Partition column not found in schema: "
-                  + col
-                  + " (available: "
-                  + Arrays.toString(names)
-                  + ")");
+      } catch (RuntimeException e) {
+        if (shardingSpec.hasSourceIds()) {
+          throw e;
         }
-        indices[i] = found;
+        // Staged creates initialize MemWAL after data files are written, so there may not be
+        // dataset metadata to read yet. Fall back to an equivalent in-memory sharding binding.
+        LOG.warn("Falling back to in-memory sharding metadata for sharded write", e);
       }
-      return indices;
+      return new ShardingBatchKeyEvaluator.ShardingBinding(shardingSpec.toShardingSpec(), null);
     }
 
-    private DataType[] resolvePartitionColumnTypes(int[] indices) {
-      StructField[] fields = schema.fields();
-      DataType[] types = new DataType[indices.length];
-      for (int i = 0; i < indices.length; i++) {
-        types[i] = fields[indices[i]].dataType();
+    private static final class ShardingSpecSnapshot implements Serializable {
+      private static final long serialVersionUID = 1L;
+
+      private final int specId;
+      private final List<ShardingFieldSnapshot> fields;
+
+      private ShardingSpecSnapshot(int specId, List<ShardingFieldSnapshot> fields) {
+        this.specId = specId;
+        this.fields = fields;
       }
-      return types;
+
+      private static ShardingSpecSnapshot from(ShardingSpec spec) {
+        List<ShardingFieldSnapshot> fields = new ArrayList<>();
+        for (ShardingField field : spec.fields()) {
+          fields.add(ShardingFieldSnapshot.from(field));
+        }
+        return new ShardingSpecSnapshot(spec.specId(), fields);
+      }
+
+      private ShardingSpec toShardingSpec() {
+        List<ShardingField> restored = new ArrayList<>();
+        for (ShardingFieldSnapshot field : fields) {
+          restored.add(field.toShardingField());
+        }
+        return new ShardingSpec(specId, restored);
+      }
+
+      private boolean hasSourceIds() {
+        for (ShardingFieldSnapshot field : fields) {
+          if (!field.sourceIds.isEmpty()) {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+
+    private static final class ShardingFieldSnapshot implements Serializable {
+      private static final long serialVersionUID = 1L;
+
+      private final String fieldId;
+      private final List<Integer> sourceIds;
+      private final String transform;
+      private final String expression;
+      private final String resultType;
+      private final Map<String, String> parameters;
+
+      private ShardingFieldSnapshot(
+          String fieldId,
+          List<Integer> sourceIds,
+          String transform,
+          String expression,
+          String resultType,
+          Map<String, String> parameters) {
+        this.fieldId = fieldId;
+        this.sourceIds = sourceIds;
+        this.transform = transform;
+        this.expression = expression;
+        this.resultType = resultType;
+        this.parameters = parameters;
+      }
+
+      private static ShardingFieldSnapshot from(ShardingField field) {
+        return new ShardingFieldSnapshot(
+            field.fieldId(),
+            new ArrayList<>(field.sourceIds()),
+            field.transform().orElse(null),
+            field.expression().orElse(null),
+            field.resultType(),
+            new HashMap<>(field.parameters()));
+      }
+
+      private ShardingField toShardingField() {
+        return new ShardingField(fieldId, sourceIds, transform, expression, resultType, parameters);
+      }
     }
   }
 }

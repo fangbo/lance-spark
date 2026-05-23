@@ -13,6 +13,7 @@
  */
 package org.lance.spark;
 
+import org.lance.memwal.ShardingSpec;
 import org.lance.spark.read.LanceScanBuilder;
 import org.lance.spark.utils.BlobSourceContext;
 import org.lance.spark.utils.BlobUtils;
@@ -175,6 +176,9 @@ public class LanceDataset
   /** Table properties from the Lance dataset config, exposed via {@link #properties()}. */
   private final Map<String, String> tableProperties;
 
+  /** In-memory sharding spec for newly staged tables before MemWAL metadata can be read. */
+  private final ShardingSpec shardingSpec;
+
   /**
    * Creates a Lance dataset.
    *
@@ -203,7 +207,8 @@ public class LanceDataset
         managedVersioning,
         null,
         fileFormatVersion,
-        Collections.emptyMap());
+        Collections.emptyMap(),
+        null);
   }
 
   /**
@@ -218,6 +223,7 @@ public class LanceDataset
    * @param stagedCommit the eagerly created staged commit, or null for non-staged tables
    * @param fileFormatVersion the file format version for writes, or null to use default
    * @param tableProperties table properties from Lance dataset config
+   * @param shardingSpec in-memory sharding spec for newly staged tables
    */
   public LanceDataset(
       LanceSparkReadOptions readOptions,
@@ -228,7 +234,8 @@ public class LanceDataset
       boolean managedVersioning,
       StagedCommit stagedCommit,
       String fileFormatVersion,
-      Map<String, String> tableProperties) {
+      Map<String, String> tableProperties,
+      ShardingSpec shardingSpec) {
     this.readOptions = readOptions;
     this.sparkSchema = sparkSchema;
     this.initialStorageOptions = initialStorageOptions;
@@ -238,6 +245,7 @@ public class LanceDataset
     this.stagedCommit = stagedCommit;
     this.fileFormatVersion = fileFormatVersion;
     this.tableProperties = Collections.unmodifiableMap(new HashMap<>(tableProperties));
+    this.shardingSpec = shardingSpec;
   }
 
   public LanceSparkReadOptions readOptions() {
@@ -285,7 +293,7 @@ public class LanceDataset
         initialStorageOptions,
         namespaceImpl,
         namespaceProperties,
-        tableProperties);
+        shardingSpec);
   }
 
   @Override
@@ -385,7 +393,7 @@ public class LanceDataset
             namespaceProperties,
             readOptions.getTableId(),
             managedVersioning,
-            tableProperties,
+            shardingSpec,
             blobSourceContexts);
 
     if (stagedCommit != null) {

@@ -13,17 +13,18 @@
  */
 package org.lance.spark.write;
 
+import org.lance.Dataset;
 import org.lance.WriteParams;
-import org.lance.spark.LanceConstant;
+import org.lance.memwal.ShardingSpec;
+import org.lance.schema.LanceSchema;
 import org.lance.spark.LanceSparkWriteOptions;
+import org.lance.spark.sharding.SparkLanceShardingUtils;
 import org.lance.spark.utils.BlobSourceContext;
+import org.lance.spark.utils.Utils;
 
 import org.apache.spark.sql.connector.distributions.Distribution;
 import org.apache.spark.sql.connector.distributions.Distributions;
-import org.apache.spark.sql.connector.expressions.Expressions;
 import org.apache.spark.sql.connector.expressions.NamedReference;
-import org.apache.spark.sql.connector.expressions.NullOrdering;
-import org.apache.spark.sql.connector.expressions.SortDirection;
 import org.apache.spark.sql.connector.expressions.SortOrder;
 import org.apache.spark.sql.connector.write.BatchWrite;
 import org.apache.spark.sql.connector.write.RequiresDistributionAndOrdering;
@@ -33,19 +34,17 @@ import org.apache.spark.sql.connector.write.WriteBuilder;
 import org.apache.spark.sql.connector.write.streaming.StreamingWrite;
 import org.apache.spark.sql.types.StructType;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * Spark write implementation for Lance tables.
  *
- * <p>When the table property {@code lance.partition.columns} is set, this write requires Spark to
- * cluster (partition) the input data by those columns before writing. This ensures each Lance
- * fragment contains exactly one distinct value for the partition column(s), which is the
- * prerequisite for Storage-Partitioned Joins (SPJ) on the read path.
+ * <p>When a Lance sharding spec is configured, this write asks Spark to cluster input data by the
+ * sharding columns before writing and rolls fragments on sharding-key boundaries. This keeps each
+ * Lance fragment within one sharding key, which is the prerequisite for Storage-Partitioned Joins
+ * (SPJ) on the read path.
  */
 public class SparkWrite implements Write, RequiresDistributionAndOrdering {
   private final LanceSparkWriteOptions writeOptions;
@@ -71,7 +70,10 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
   private final List<String> tableId;
   private final boolean managedVersioning;
   private final StagedCommit stagedCommit;
-  private final Map<String, String> tableProperties;
+  private final ShardingSpec initialShardingSpec;
+  private ShardingSpec cachedShardingSpec;
+  private LanceSchema cachedLanceSchema;
+  private boolean cachedShardingSpecLoaded;
 
   /** Per-source blob credential/open contexts keyed by source dataset URI. */
   private final Map<String, BlobSourceContext> blobSourceContexts;
@@ -86,7 +88,7 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
       List<String> tableId,
       boolean managedVersioning,
       StagedCommit stagedCommit,
-      Map<String, String> tableProperties,
+      ShardingSpec initialShardingSpec,
       Map<String, BlobSourceContext> blobSourceContexts) {
     this.schema = schema;
     this.writeOptions = writeOptions;
@@ -97,52 +99,57 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
     this.tableId = tableId;
     this.managedVersioning = managedVersioning;
     this.stagedCommit = stagedCommit;
-    this.tableProperties =
-        tableProperties != null
-            ? Collections.unmodifiableMap(tableProperties)
-            : Collections.emptyMap();
+    this.initialShardingSpec = initialShardingSpec;
     this.blobSourceContexts =
         blobSourceContexts == null ? Collections.emptyMap() : blobSourceContexts;
   }
 
-  /** Returns partition column names from the table property, empty list if unset. */
-  private List<String> partitionColumnList() {
-    String raw = tableProperties.get(LanceConstant.TABLE_OPT_PARTITION_COLUMNS);
-    if (raw == null || raw.trim().isEmpty()) {
-      return Collections.emptyList();
+  private ShardingSpec shardingSpec() {
+    if (!cachedShardingSpecLoaded) {
+      if (stagedCommit != null || !SparkLanceShardingUtils.isEmpty(initialShardingSpec)) {
+        cachedShardingSpec = initialShardingSpec;
+      } else {
+        try (Dataset dataset =
+            Utils.openDatasetBuilder(writeOptions)
+                .initialStorageOptions(initialStorageOptions)
+                .runtimeNamespace(namespaceImpl, namespaceProperties, tableId)
+                .build()) {
+          cachedLanceSchema = dataset.getLanceSchema();
+          cachedShardingSpec = SparkLanceShardingUtils.firstShardingSpec(dataset);
+        }
+      }
+      cachedShardingSpecLoaded = true;
     }
-    return Arrays.stream(raw.split(","))
-        .map(String::trim)
-        .filter(s -> !s.isEmpty())
-        .collect(Collectors.toList());
+    return cachedShardingSpec;
   }
 
   @Override
   public Distribution requiredDistribution() {
-    List<String> cols = partitionColumnList();
-    if (cols.isEmpty()) {
+    ShardingSpec spec = shardingSpec();
+    if (SparkLanceShardingUtils.isEmpty(spec)) {
       return Distributions.unspecified();
     }
-    NamedReference[] refs = cols.stream().map(Expressions::column).toArray(NamedReference[]::new);
+    NamedReference[] refs =
+        SparkLanceShardingUtils.fields(spec).stream()
+            .map(field -> SparkLanceShardingUtils.toClusteringRef(field, cachedLanceSchema))
+            .toArray(NamedReference[]::new);
     return Distributions.clustered(refs);
   }
 
   @Override
   public SortOrder[] requiredOrdering() {
-    List<String> cols = partitionColumnList();
-    if (cols.isEmpty()) {
+    ShardingSpec spec = shardingSpec();
+    if (SparkLanceShardingUtils.isEmpty(spec)) {
       return new SortOrder[0];
     }
-    return cols.stream()
-        .map(
-            col ->
-                Expressions.sort(
-                    Expressions.column(col), SortDirection.ASCENDING, NullOrdering.NULLS_FIRST))
+    return SparkLanceShardingUtils.fields(spec).stream()
+        .map(field -> SparkLanceShardingUtils.toSortOrder(field, cachedLanceSchema))
         .toArray(SortOrder[]::new);
   }
 
   @Override
   public BatchWrite toBatch() {
+    ShardingSpec spec = shardingSpec();
     return new LanceBatchWrite(
         schema,
         writeOptions,
@@ -153,7 +160,7 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
         tableId,
         managedVersioning,
         stagedCommit,
-        partitionColumnList(),
+        spec,
         blobSourceContexts);
   }
 
@@ -181,7 +188,7 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
     private final Map<String, String> namespaceProperties;
     private final List<String> tableId;
     private final boolean managedVersioning;
-    private final Map<String, String> tableProperties;
+    private final ShardingSpec shardingSpec;
     private final Map<String, BlobSourceContext> blobSourceContexts;
 
     public SparkWriteBuilder(
@@ -191,8 +198,28 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
         String namespaceImpl,
         Map<String, String> namespaceProperties,
         List<String> tableId,
+        boolean managedVersioning) {
+      this(
+          schema,
+          writeOptions,
+          initialStorageOptions,
+          namespaceImpl,
+          namespaceProperties,
+          tableId,
+          managedVersioning,
+          null,
+          Collections.emptyMap());
+    }
+
+    public SparkWriteBuilder(
+        StructType schema,
+        LanceSparkWriteOptions writeOptions,
+        Map<String, String> initialStorageOptions,
+        String namespaceImpl,
+        Map<String, String> namespaceProperties,
+        List<String> tableId,
         boolean managedVersioning,
-        Map<String, String> tableProperties,
+        ShardingSpec shardingSpec,
         Map<String, BlobSourceContext> blobSourceContexts) {
       this.schema = schema;
       this.writeOptions = writeOptions;
@@ -201,7 +228,7 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
       this.namespaceProperties = namespaceProperties;
       this.tableId = tableId;
       this.managedVersioning = managedVersioning;
-      this.tableProperties = tableProperties;
+      this.shardingSpec = shardingSpec;
       this.blobSourceContexts =
           blobSourceContexts == null ? Collections.emptyMap() : blobSourceContexts;
     }
@@ -242,7 +269,7 @@ public class SparkWrite implements Write, RequiresDistributionAndOrdering {
           tableId,
           managedVersioning,
           stagedCommit,
-          tableProperties,
+          shardingSpec,
           blobSourceContexts);
     }
 

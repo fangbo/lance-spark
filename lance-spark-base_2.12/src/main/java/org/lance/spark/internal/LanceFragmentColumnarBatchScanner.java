@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 public class LanceFragmentColumnarBatchScanner implements AutoCloseable {
@@ -92,6 +93,10 @@ public class LanceFragmentColumnarBatchScanner implements AutoCloseable {
 
   public long getScannerCreateTimeNs() {
     return fragmentScanner.getScannerCreateTimeNs();
+  }
+
+  public Optional<ScanStats> getScanStats() {
+    return fragmentScanner.getScanStats();
   }
 
   @Override

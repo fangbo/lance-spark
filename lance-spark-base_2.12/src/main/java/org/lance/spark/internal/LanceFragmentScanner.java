@@ -300,4 +300,8 @@ public class LanceFragmentScanner implements AutoCloseable {
     }
     return false;
   }
+
+  public Optional<ScanStats> getScanStats() {
+    return scanner == null ? Optional.empty() : scanner.getStats();
+  }
 }

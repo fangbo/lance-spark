@@ -156,6 +156,13 @@ object LanceArrowUtils {
           if fp.getPrecision == FloatingPointPrecision.HALF =>
         // Widen float16 to float32 for Spark (Spark has no native float16 type)
         FloatType
+      case _: ArrowType.Time =>
+        // Spark's own ArrowUtils accepts only Time(NANOSECOND, 64); other units throw.
+        // We accept all four Arrow Time variants (Sec/Milli/Micro/Nano) and rescale to nanos
+        // in TimeUnitAccessor so Lance datasets written by non-Spark producers (Arrow,
+        // DataFusion, Polars) round-trip cleanly.
+        // TimeType is Spark 4.1+ only; fall back to LongType (raw nanos) on older versions.
+        TimeUtils.resolveSparkTimeType()
       case d: ArrowType.Decimal if d.getBitWidth == 256 =>
         // Spark only supports 128-bit decimal (precision <= 38).
         // Throw at schema time rather than a cryptic UnsupportedOperationException
@@ -439,6 +446,9 @@ object LanceArrowUtils {
     case _: YearMonthIntervalType => new ArrowType.Interval(IntervalUnit.YEAR_MONTH)
     case _: DayTimeIntervalType => new ArrowType.Duration(TimeUnit.MICROSECOND)
     case CalendarIntervalType => new ArrowType.Interval(IntervalUnit.MONTH_DAY_NANO)
+    // TimeType is Spark 4.1+ only. Use class name check for cross-version compatibility.
+    case dt if dt.getClass.getName == "org.apache.spark.sql.types.TimeType" =>
+      new ArrowType.Time(TimeUnit.NANOSECOND, 64)
     // In Spark 3.4/3.5, CharType and VarcharType extend AtomicType (not StringType),
     // so `case _: StringType` above does not match them. On Spark 4.0+ they extend
     // StringType and are already caught above, making these branches harmlessly unreachable.
@@ -521,5 +531,45 @@ object LanceArrowUtils {
     val metadata = field.getMetadata
     metadata != null && metadata.containsKey(ENCODING_BLOB) &&
     "true".equalsIgnoreCase(metadata.get(ENCODING_BLOB))
+  }
+}
+
+/**
+ * Resolves Spark TimeType via reflection for cross-version compatibility.
+ * TimeType is only available in Spark 4.1+.
+ */
+private[util] object TimeUtils {
+  @volatile private var timeTypeResult: Option[DataType] = null
+
+  /**
+   * Returns Spark TimeType (default precision) if available (Spark 4.1+), otherwise LongType.
+   */
+  def resolveSparkTimeType(): DataType = {
+    if (timeTypeResult == null) {
+      synchronized {
+        if (timeTypeResult == null) {
+          timeTypeResult =
+            try {
+              // TimeType$ is the Scala companion object; its apply() returns TimeType
+              // with default precision (MICROS_PRECISION = 6).
+              val companionClass = Class.forName("org.apache.spark.sql.types.TimeType$")
+              val module = companionClass.getField("MODULE$").get(null)
+              val applyMethod = companionClass.getMethod("apply")
+              Some(applyMethod.invoke(module).asInstanceOf[DataType])
+            } catch {
+              case _: ClassNotFoundException | _: NoSuchFieldException |
+                  _: NoSuchMethodException => None
+            }
+        }
+      }
+    }
+    timeTypeResult.getOrElse(LongType)
+  }
+
+  /**
+   * Returns true if Spark TimeType is available (Spark 4.1+).
+   */
+  def isTimeTypeAvailable: Boolean = {
+    resolveSparkTimeType() ne LongType
   }
 }

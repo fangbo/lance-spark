@@ -1602,7 +1602,8 @@ public abstract class BaseLanceNamespaceSparkCatalog
         namespaceProperties,
         managedVersioning,
         fileFormatVersion,
-        tableProperties);
+        tableProperties,
+        null);
   }
 
   private static final String TAG_KEY = "__tag__";
@@ -1660,7 +1661,8 @@ public abstract class BaseLanceNamespaceSparkCatalog
         namespaceProperties,
         managedVersioning,
         fileFormatVersion,
-        tableProperties);
+        tableProperties,
+        null);
   }
 
   /**

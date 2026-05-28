@@ -88,6 +88,9 @@ public class LanceCountStarPartitionReader implements PartitionReader<ColumnarBa
       scanOptionsBuilder.columns(Lists.newArrayList());
       scanOptionsBuilder.fragmentIds(fragmentIds);
 
+      // Collect scan stats
+      scanOptionsBuilder.collectStats(true);
+
       long scanCreateStart = System.nanoTime();
       try (LanceScanner scanner = dataset.newScan(scanOptionsBuilder.build())) {
         metricsTracker.addScannerCreateTimeNs(System.nanoTime() - scanCreateStart);

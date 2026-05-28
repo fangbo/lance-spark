@@ -13,6 +13,7 @@
  */
 package org.lance.spark.internal;
 
+import org.lance.ipc.ScanStats;
 import org.lance.spark.LanceConstant;
 import org.lance.spark.read.LanceInputPartition;
 import org.lance.spark.vectorized.BlobStructAccessor;

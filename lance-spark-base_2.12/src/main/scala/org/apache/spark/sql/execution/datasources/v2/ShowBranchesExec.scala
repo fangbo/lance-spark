@@ -38,9 +38,14 @@ case class ShowBranchesExec(
     val dataset = Utils.openDatasetBuilder(lanceDataset.readOptions()).build()
     try {
       dataset.branches().list().asScala.map { branch =>
+        val parentBranch = if (branch.getParentBranch.isPresent) {
+          UTF8String.fromString(branch.getParentBranch.get())
+        } else {
+          null
+        }
         new GenericInternalRow(Array[Any](
-          UTF8String.fromString(Option(branch.getName()).getOrElse("")),
-          UTF8String.fromString(branch.getParentBranch().orElse("")),
+          UTF8String.fromString(branch.getName),
+          parentBranch,
           branch.getParentVersion(),
           branch.getCreateAt(),
           branch.getManifestSize()))

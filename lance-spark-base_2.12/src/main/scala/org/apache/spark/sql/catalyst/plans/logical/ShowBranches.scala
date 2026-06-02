@@ -36,7 +36,7 @@ object ShowBranchesOutputType {
   val SCHEMA = StructType(
     Array(
       StructField("name", DataTypes.StringType, nullable = false),
-      StructField("parent_branch", DataTypes.StringType, nullable = false),
+      StructField("parent_branch", DataTypes.StringType, nullable = true),
       StructField("parent_version", DataTypes.LongType, nullable = false),
       StructField("create_at", DataTypes.LongType, nullable = false),
       StructField("manifest_size", DataTypes.IntegerType, nullable = false)))

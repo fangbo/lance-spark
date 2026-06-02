@@ -88,6 +88,7 @@ public abstract class BaseBranchDDLTest {
     Map<String, BranchInfo> branches =
         showBranches(String.format("show branches from %s", fullTable));
     BranchInfo branch = assertBranchExists(branches, "branch_from_main");
+    Assertions.assertNull(branch.parentBranch);
     Assertions.assertEquals(versions.latestVersion, branch.parentVersion);
     Assertions.assertTrue(branch.createAt > 0L, "Expected create_at to be positive");
     Assertions.assertTrue(branch.manifestSize >= 1, "Expected manifest_size to be positive");
@@ -109,6 +110,7 @@ public abstract class BaseBranchDDLTest {
     Map<String, BranchInfo> branches =
         showBranches(String.format("show branches from %s", fullTable));
     BranchInfo branch = assertBranchExists(branches, "branch_from_main_v1");
+    Assertions.assertNull(branch.parentBranch);
     Assertions.assertEquals(versions.firstInsertVersion, branch.parentVersion);
   }
 
@@ -177,6 +179,7 @@ public abstract class BaseBranchDDLTest {
     Map<String, BranchInfo> branches =
         showBranches(String.format("show branches from %s", fullTable));
     BranchInfo branch = assertBranchExists(branches, "branch_from_tag");
+    Assertions.assertNull(branch.parentBranch);
     Assertions.assertEquals(versions.firstInsertVersion, branch.parentVersion);
   }
 
@@ -246,7 +249,7 @@ public abstract class BaseBranchDDLTest {
     Dataset<Row> result = spark.sql(sqlText);
     Assertions.assertEquals(
         "StructType(StructField(name,StringType,false),"
-            + "StructField(parent_branch,StringType,false),"
+            + "StructField(parent_branch,StringType,true),"
             + "StructField(parent_version,LongType,false),"
             + "StructField(create_at,LongType,false),"
             + "StructField(manifest_size,IntegerType,false))",

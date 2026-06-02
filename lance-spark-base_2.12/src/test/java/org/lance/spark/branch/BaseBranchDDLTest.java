@@ -71,7 +71,7 @@ public abstract class BaseBranchDDLTest {
   @AfterEach
   public void tearDown() {
     if (spark != null) {
-      spark.close();
+      spark.stop();
     }
   }
 

@@ -110,7 +110,10 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     if (ctx.refMainVersion == null) CreateBranch(table, branchName, org.lance.Ref.ofMain())
-    else CreateBranch(table, branchName, org.lance.Ref.ofMain(java.lang.Long.valueOf(ctx.refMainVersion.getText)))
+    else CreateBranch(
+      table,
+      branchName,
+      org.lance.Ref.ofMain(java.lang.Long.valueOf(ctx.refMainVersion.getText)))
   }
 
   override def visitCreateBranchRefBranch(
@@ -118,8 +121,12 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     val refBranchName = cleanIdentifier(ctx.refBranchName.getText)
-    if (ctx.refBranchVersion == null) CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName))
-    else CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName, java.lang.Long.valueOf(ctx.refBranchVersion.getText)))
+    if (ctx.refBranchVersion == null)
+      CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName))
+    else CreateBranch(
+      table,
+      branchName,
+      org.lance.Ref.ofBranch(refBranchName, java.lang.Long.valueOf(ctx.refBranchVersion.getText)))
   }
 
   override def visitCreateBranchRefTag(ctx: LanceSqlExtensionsParser.CreateBranchRefTagContext)

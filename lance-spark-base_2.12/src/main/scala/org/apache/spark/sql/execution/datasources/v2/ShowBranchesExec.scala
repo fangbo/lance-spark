@@ -44,7 +44,7 @@ case class ShowBranchesExec(
           branch.getParentVersion(),
           branch.getCreateAt(),
           branch.getManifestSize()))
-      }
+      }.toSeq
     } finally {
       dataset.close()
     }

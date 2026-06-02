@@ -15,7 +15,7 @@ package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedIdentifier, UnresolvedRelation}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{AddColumnsBackfill, AddIndex, LanceDropIndex, LanceNamedArgument, LogicalPlan, Optimize, SetUnenforcedPrimaryKey, ShowIndexes, UpdateColumnsBackfill, Vacuum}
+import org.apache.spark.sql.catalyst.plans.logical.{AddColumnsBackfill, AddIndex, CreateBranch, DropBranch, LanceDropIndex, LanceNamedArgument, LogicalPlan, Optimize, SetUnenforcedPrimaryKey, ShowBranches, ShowIndexes, UpdateColumnsBackfill, Vacuum}
 import org.lance.spark.utils.ParserUtils
 
 import scala.jdk.CollectionConverters._
@@ -103,6 +103,43 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val indexName = cleanIdentifier(ctx.indexName.getText)
     LanceDropIndex(table, indexName)
+  }
+
+  override def visitCreateBranchRefMain(ctx: LanceSqlExtensionsParser.CreateBranchRefMainContext)
+      : CreateBranch = {
+    val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
+    val branchName = cleanIdentifier(ctx.branchName.getText)
+    if (ctx.refMainVersion == null) CreateBranch(table, branchName, org.lance.Ref.ofMain())
+    else CreateBranch(table, branchName, org.lance.Ref.ofMain(java.lang.Long.valueOf(ctx.refMainVersion.getText)))
+  }
+
+  override def visitCreateBranchRefBranch(
+      ctx: LanceSqlExtensionsParser.CreateBranchRefBranchContext): CreateBranch = {
+    val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
+    val branchName = cleanIdentifier(ctx.branchName.getText)
+    val refBranchName = cleanIdentifier(ctx.refBranchName.getText)
+    if (ctx.refBranchVersion == null) CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName))
+    else CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName, java.lang.Long.valueOf(ctx.refBranchVersion.getText)))
+  }
+
+  override def visitCreateBranchRefTag(ctx: LanceSqlExtensionsParser.CreateBranchRefTagContext)
+      : CreateBranch = {
+    val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
+    val branchName = cleanIdentifier(ctx.branchName.getText)
+    val refTagName = cleanIdentifier(ctx.refTagName.getText)
+    CreateBranch(table, branchName, org.lance.Ref.ofTag(refTagName))
+  }
+
+  override def visitDropBranch(ctx: LanceSqlExtensionsParser.DropBranchContext): DropBranch = {
+    val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
+    val branchName = cleanIdentifier(ctx.branchName.getText)
+    DropBranch(table, branchName)
+  }
+
+  override def visitShowBranches(ctx: LanceSqlExtensionsParser.ShowBranchesContext)
+      : ShowBranches = {
+    val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
+    ShowBranches(table)
   }
 
   override def visitSetUnenforcedPrimaryKey(

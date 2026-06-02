@@ -22,7 +22,15 @@ statement
     : ALTER TABLE multipartIdentifier ADD COLUMNS columnList FROM identifier                    #addColumnsBackfill
     | ALTER TABLE multipartIdentifier UPDATE COLUMNS columnList FROM identifier                 #updateColumnsBackfill
     | ALTER TABLE multipartIdentifier CREATE INDEX indexName=identifier USING method=identifier '(' columnList ')' (WITH '(' (namedArgument (',' namedArgument)*)? ')')? #createIndex
-    | ALTER TABLE multipartIdentifier DROP INDEX indexName=identifier                             #dropIndex
+    | ALTER TABLE multipartIdentifier DROP INDEX indexName=identifier                           #dropIndex
+    | ALTER TABLE multipartIdentifier CREATE BRANCH branchName=identifier
+        (VERSION AS OF REF '/' MAIN '/' refMainVersion=versionNumber)?                          #createBranchRefMain
+    | ALTER TABLE multipartIdentifier CREATE BRANCH branchName=identifier
+        VERSION AS OF REF '/' BRANCH '/' refBranchName=identifier ('/' refBranchVersion=versionNumber)?    #createBranchRefBranch
+    | ALTER TABLE multipartIdentifier CREATE BRANCH branchName=identifier
+        VERSION AS OF REF '/' TAG '/' refTagName=identifier                                     #createBranchRefTag
+    | ALTER TABLE multipartIdentifier DROP BRANCH branchName=identifier                         #dropBranch
+    | SHOW (BRANCHES | BRANCH) (FROM | IN) multipartIdentifier                                  #showBranches
     | SHOW (INDEXES | INDEX) (FROM | IN) multipartIdentifier                                    #showIndexes
     | OPTIMIZE multipartIdentifier (WITH '(' (namedArgument (',' namedArgument)*)? ')')?        #optimize
     | VACUUM multipartIdentifier (WITH '(' (namedArgument (',' namedArgument)*)? ')')?          #vacuum
@@ -66,8 +74,15 @@ number
     | MINUS? DOUBLE_LITERAL             #doubleLiteral
     ;
 
+versionNumber
+    : BIGINT_LITERAL
+    ;
+
 ADD: 'ADD';
 ALTER: 'ALTER';
+AS: 'AS';
+BRANCHES: 'BRANCHES';
+BRANCH: 'BRANCH';
 COLUMNS: 'COLUMNS';
 CREATE: 'CREATE';
 DROP: 'DROP';
@@ -76,15 +91,20 @@ IN: 'IN';
 INDEX: 'INDEX';
 INDEXES: 'INDEXES';
 KEY: 'KEY';
+MAIN: 'MAIN';
+OF: 'OF';
 OPTIMIZE: 'OPTIMIZE';
 PRIMARY: 'PRIMARY';
+REF: 'REF';
 SET: 'SET';
 SHOW: 'SHOW';
 TABLE: 'TABLE';
+TAG: 'TAG';
 UNENFORCED: 'UNENFORCED';
 UPDATE: 'UPDATE';
 USING: 'USING';
 VACUUM: 'VACUUM';
+VERSION: 'VERSION';
 WITH: 'WITH';
 
 TRUE: 'TRUE';
@@ -134,5 +154,3 @@ fragment DIGIT
 fragment LETTER
     : [A-Z]
     ;
-
-

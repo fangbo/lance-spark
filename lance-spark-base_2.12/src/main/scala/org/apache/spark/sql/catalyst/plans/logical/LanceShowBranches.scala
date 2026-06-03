@@ -16,27 +16,29 @@ package org.apache.spark.sql.catalyst.plans.logical
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.types.{DataTypes, StructField, StructType}
 
-case class DropBranch(
-    table: LogicalPlan,
-    branchName: String) extends Command {
+case class LanceShowBranches(table: LogicalPlan) extends Command {
 
   override def children: Seq[LogicalPlan] = Seq(table)
 
-  override def output: Seq[Attribute] = DropBranchOutputType.SCHEMA
+  override def output: Seq[Attribute] = LanceShowBranchesOutputType.SCHEMA
 
   override def simpleString(maxFields: Int): String = {
-    s"DropBranch(${branchName})"
+    s"ShowBranches(${table})"
   }
 
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan])
-      : DropBranch = {
-    copy(newChildren(0), this.branchName)
+      : LanceShowBranches = {
+    copy(newChildren(0))
   }
 }
 
-object DropBranchOutputType {
+object LanceShowBranchesOutputType {
   val SCHEMA = StructType(
     Array(
-      StructField("name", DataTypes.StringType, nullable = false)))
+      StructField("name", DataTypes.StringType, nullable = false),
+      StructField("parent_branch", DataTypes.StringType, nullable = true),
+      StructField("parent_version", DataTypes.LongType, nullable = false),
+      StructField("created_at", DataTypes.LongType, nullable = false),
+      StructField("manifest_size", DataTypes.IntegerType, nullable = false)))
     .map(field => AttributeReference(field.name, field.dataType, field.nullable, field.metadata)())
 }

@@ -15,43 +15,50 @@ package org.apache.spark.sql.execution.datasources.v2
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
-import org.apache.spark.sql.catalyst.plans.logical.ShowBranchesOutputType
+import org.apache.spark.sql.catalyst.plans.logical.LanceCreateBranchOutputType
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.unsafe.types.UTF8String
-import org.lance.spark.LanceDataset
+import org.lance.spark.{BaseLanceNamespaceSparkCatalog, LanceDataset}
 import org.lance.spark.utils.Utils
 
 import scala.collection.JavaConverters._
 
-case class ShowBranchesExec(
+case class LanceCreateBranchExec(
     catalog: TableCatalog,
-    ident: Identifier) extends LeafV2CommandExec {
+    ident: Identifier,
+    branchName: String,
+    ref: org.lance.Ref,
+    ifNotExists: Boolean) extends LeafV2CommandExec {
 
-  override def output: Seq[Attribute] = ShowBranchesOutputType.SCHEMA
+  override def output: Seq[Attribute] = LanceCreateBranchOutputType.SCHEMA
 
   override protected def run(): Seq[InternalRow] = {
     val lanceDataset = catalog.loadTable(ident) match {
       case d: LanceDataset => d
-      case _ => throw new UnsupportedOperationException("ShowBranches only supports LanceDataset")
+      case _ => throw new UnsupportedOperationException("CreateBranch only supports LanceDataset")
     }
 
-    val dataset = Utils.openDatasetBuilder(lanceDataset.readOptions()).build()
+    val dataset = Utils.openDatasetBuilder(lanceDataset.readOptions())
+      .initialStorageOptions(lanceDataset.getInitialStorageOptions)
+      .build()
+
     try {
-      dataset.branches().list().asScala.map { branch =>
-        val parentBranch = if (branch.getParentBranch.isPresent) {
-          UTF8String.fromString(branch.getParentBranch.get())
-        } else {
-          null
+      val alreadyExists = dataset.branches().list().asScala.exists(_.getName == branchName)
+      if (!ifNotExists || !alreadyExists) {
+        var branchDs: org.lance.Dataset = null
+        try {
+          branchDs = dataset.createBranch(branchName, ref, dataset.getInitialStorageOptions)
+        } finally {
+          if (branchDs != null) {
+            branchDs.close()
+          }
         }
-        new GenericInternalRow(Array[Any](
-          UTF8String.fromString(branch.getName),
-          parentBranch,
-          branch.getParentVersion(),
-          branch.getCreateAt(),
-          branch.getManifestSize()))
-      }.toSeq
+      }
     } finally {
       dataset.close()
     }
+
+    Seq(new GenericInternalRow(Array[Any](
+      UTF8String.fromString(branchName))))
   }
 }

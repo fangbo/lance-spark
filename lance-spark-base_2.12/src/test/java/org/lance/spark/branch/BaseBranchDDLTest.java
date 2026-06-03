@@ -80,7 +80,9 @@ public abstract class BaseBranchDDLTest {
     DatasetVersions versions = prepareDatasetWithHistory();
 
     Dataset<Row> result =
-        spark.sql(String.format("alter table %s create branch branch_from_main", fullTable));
+        spark.sql(
+            String.format(
+                "alter table %s create branch if not exists branch_from_main", fullTable));
 
     assertSingleNameSchema(result);
     Assertions.assertEquals("branch_from_main", result.collectAsList().get(0).getString(0));
@@ -90,7 +92,7 @@ public abstract class BaseBranchDDLTest {
     BranchInfo branch = assertBranchExists(branches, "branch_from_main");
     Assertions.assertNull(branch.parentBranch);
     Assertions.assertEquals(versions.latestVersion, branch.parentVersion);
-    Assertions.assertTrue(branch.createAt > 0L, "Expected create_at to be positive");
+    Assertions.assertTrue(branch.createdAt > 0L, "Expected created_at to be positive");
     Assertions.assertTrue(branch.manifestSize >= 1, "Expected manifest_size to be positive");
   }
 
@@ -101,7 +103,8 @@ public abstract class BaseBranchDDLTest {
     Dataset<Row> result =
         spark.sql(
             String.format(
-                "alter table %s create branch branch_from_main_v1 " + "version as of ref/main/%d",
+                "alter table %s create branch if not exists branch_from_main_v1 "
+                    + "as of version %d",
                 fullTable, versions.firstInsertVersion));
 
     assertSingleNameSchema(result);
@@ -118,13 +121,12 @@ public abstract class BaseBranchDDLTest {
   public void testCreateBranchFromBranchHead() {
     DatasetVersions versions = prepareDatasetWithHistory();
 
-    spark.sql(String.format("alter table %s create branch source_branch", fullTable));
+    spark.sql(String.format("alter table %s create branch if not exists source_branch", fullTable));
 
     Dataset<Row> result =
         spark.sql(
             String.format(
-                "alter table %s create branch child_branch "
-                    + "version as of ref/branch/source_branch",
+                "alter table %s create branch child_branch " + "as of branch source_branch",
                 fullTable));
 
     assertSingleNameSchema(result);
@@ -138,19 +140,45 @@ public abstract class BaseBranchDDLTest {
   }
 
   @Test
+  public void testCreateBranchFromBranchHeadWithBacktickQuotedSourceBranchName() {
+    DatasetVersions versions = prepareDatasetWithHistory();
+    String sourceBranchName = "source-branch";
+
+    spark.sql(
+        String.format(
+            "alter table %s create branch if not exists `%s`", fullTable, sourceBranchName));
+
+    Dataset<Row> result =
+        spark.sql(
+            String.format(
+                "alter table %s create branch child_branch_from_quoted_source as of branch `%s`",
+                fullTable, sourceBranchName));
+
+    assertSingleNameSchema(result);
+    Assertions.assertEquals(
+        "child_branch_from_quoted_source", result.collectAsList().get(0).getString(0));
+
+    Map<String, BranchInfo> branches =
+        showBranches(String.format("show branches from %s", fullTable));
+    BranchInfo branch = assertBranchExists(branches, "child_branch_from_quoted_source");
+    Assertions.assertEquals(sourceBranchName, branch.parentBranch);
+    Assertions.assertEquals(versions.latestVersion, branch.parentVersion);
+  }
+
+  @Test
   public void testCreateBranchFromSpecificBranchVersion() {
     DatasetVersions versions = prepareDatasetWithHistory();
 
     spark.sql(
         String.format(
-            "alter table %s create branch source_branch " + "version as of ref/main/%d",
+            "alter table %s create branch if not exists source_branch " + "as of version %d",
             fullTable, versions.firstInsertVersion));
 
     Dataset<Row> result =
         spark.sql(
             String.format(
                 "alter table %s create branch child_branch_v1 "
-                    + "version as of ref/branch/source_branch/%d",
+                    + "as of branch source_branch version %d",
                 fullTable, versions.firstInsertVersion));
 
     assertSingleNameSchema(result);
@@ -170,7 +198,7 @@ public abstract class BaseBranchDDLTest {
     Dataset<Row> result =
         spark.sql(
             String.format(
-                "alter table %s create branch branch_from_tag " + "version as of ref/tag/%s",
+                "alter table %s create branch if not exists branch_from_tag " + "as of tag %s",
                 fullTable, versions.firstInsertTag));
 
     assertSingleNameSchema(result);
@@ -184,13 +212,53 @@ public abstract class BaseBranchDDLTest {
   }
 
   @Test
+  public void testCreateBranchIfNotExistsNoOpWhenBranchExists() {
+    DatasetVersions versions = prepareDatasetWithHistory();
+
+    spark
+        .sql(String.format("alter table %s create branch existing_branch", fullTable))
+        .collectAsList();
+
+    Dataset<Row> result =
+        spark.sql(
+            String.format(
+                "alter table %s create branch if not exists existing_branch as of version %d",
+                fullTable, versions.firstInsertVersion));
+
+    assertSingleNameSchema(result);
+    Assertions.assertEquals("existing_branch", result.collectAsList().get(0).getString(0));
+
+    Map<String, BranchInfo> branches =
+        showBranches(String.format("show branches from %s", fullTable));
+    BranchInfo branch = assertBranchExists(branches, "existing_branch");
+    Assertions.assertNull(branch.parentBranch);
+    Assertions.assertEquals(versions.latestVersion, branch.parentVersion);
+  }
+
+  @Test
+  public void testCreateBranchFailsWhenBranchExistsWithoutIfNotExists() {
+    prepareDatasetWithHistory();
+
+    spark
+        .sql(String.format("alter table %s create branch duplicate_branch", fullTable))
+        .collectAsList();
+
+    Assertions.assertThrows(
+        Exception.class,
+        () ->
+            spark
+                .sql(String.format("alter table %s create branch duplicate_branch", fullTable))
+                .collectAsList());
+  }
+
+  @Test
   public void testDropBranch() {
     prepareDatasetWithHistory();
 
     spark.sql(String.format("alter table %s create branch branch_to_drop", fullTable));
 
     Dataset<Row> result =
-        spark.sql(String.format("alter table %s drop branch branch_to_drop", fullTable));
+        spark.sql(String.format("alter table %s drop branch if exists branch_to_drop", fullTable));
 
     assertSingleNameSchema(result);
     Assertions.assertEquals("branch_to_drop", result.collectAsList().get(0).getString(0));
@@ -198,6 +266,33 @@ public abstract class BaseBranchDDLTest {
     Map<String, BranchInfo> branches =
         showBranches(String.format("show branches from %s", fullTable));
     Assertions.assertFalse(branches.containsKey("branch_to_drop"));
+  }
+
+  @Test
+  public void testDropBranchIfExistsNoOpWhenBranchDoesNotExist() {
+    prepareDatasetWithHistory();
+
+    Dataset<Row> result =
+        spark.sql(String.format("alter table %s drop branch if exists missing_branch", fullTable));
+
+    assertSingleNameSchema(result);
+    Assertions.assertEquals("missing_branch", result.collectAsList().get(0).getString(0));
+
+    Map<String, BranchInfo> branches =
+        showBranches(String.format("show branches from %s", fullTable));
+    Assertions.assertFalse(branches.containsKey("missing_branch"));
+  }
+
+  @Test
+  public void testDropBranchFailsWhenBranchDoesNotExistWithoutIfExists() {
+    prepareDatasetWithHistory();
+
+    Assertions.assertThrows(
+        Exception.class,
+        () ->
+            spark
+                .sql(String.format("alter table %s drop branch missing_branch", fullTable))
+                .collectAsList());
   }
 
   @Test
@@ -209,6 +304,23 @@ public abstract class BaseBranchDDLTest {
 
     Assertions.assertTrue(
         branches.containsKey("branch_for_show"), "Expected created branch to be returned");
+  }
+
+  @Test
+  public void testCreateBranchWithBacktickQuotedName() {
+    prepareDatasetWithHistory();
+    String branchName = "branch-with-dash";
+
+    Dataset<Row> result =
+        spark.sql(String.format("alter table %s create branch `%s`", fullTable, branchName));
+
+    assertSingleNameSchema(result);
+    Assertions.assertEquals(branchName, result.collectAsList().get(0).getString(0));
+
+    Map<String, BranchInfo> branches =
+        showBranches(String.format("show branches from %s", fullTable));
+    Assertions.assertTrue(
+        branches.containsKey(branchName), "Expected backtick-quoted branch to be returned");
   }
 
   private DatasetVersions prepareDatasetWithHistory() {
@@ -251,7 +363,7 @@ public abstract class BaseBranchDDLTest {
         "StructType(StructField(name,StringType,false),"
             + "StructField(parent_branch,StringType,true),"
             + "StructField(parent_version,LongType,false),"
-            + "StructField(create_at,LongType,false),"
+            + "StructField(created_at,LongType,false),"
             + "StructField(manifest_size,IntegerType,false))",
         result.schema().toString());
 
@@ -290,13 +402,13 @@ public abstract class BaseBranchDDLTest {
   private static final class BranchInfo {
     private final String parentBranch;
     private final long parentVersion;
-    private final long createAt;
+    private final long createdAt;
     private final int manifestSize;
 
-    private BranchInfo(String parentBranch, long parentVersion, long createAt, int manifestSize) {
+    private BranchInfo(String parentBranch, long parentVersion, long createdAt, int manifestSize) {
       this.parentBranch = parentBranch;
       this.parentVersion = parentVersion;
-      this.createAt = createAt;
+      this.createdAt = createdAt;
       this.manifestSize = manifestSize;
     }
   }

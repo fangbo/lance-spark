@@ -23,13 +23,13 @@ statement
     | ALTER TABLE multipartIdentifier UPDATE COLUMNS columnList FROM identifier                 #updateColumnsBackfill
     | ALTER TABLE multipartIdentifier CREATE INDEX indexName=identifier USING method=identifier '(' columnList ')' (WITH '(' (namedArgument (',' namedArgument)*)? ')')? #createIndex
     | ALTER TABLE multipartIdentifier DROP INDEX indexName=identifier                           #dropIndex
-    | ALTER TABLE multipartIdentifier CREATE BRANCH branchName=identifier
-        (VERSION AS OF REF '/' MAIN '/' refMainVersion=versionNumber)?                          #createBranchRefMain
-    | ALTER TABLE multipartIdentifier CREATE BRANCH branchName=identifier
-        VERSION AS OF REF '/' BRANCH '/' refBranchName=identifier ('/' refBranchVersion=versionNumber)?    #createBranchRefBranch
-    | ALTER TABLE multipartIdentifier CREATE BRANCH branchName=identifier
-        VERSION AS OF REF '/' TAG '/' refTagName=identifier                                     #createBranchRefTag
-    | ALTER TABLE multipartIdentifier DROP BRANCH branchName=identifier                         #dropBranch
+    | ALTER TABLE multipartIdentifier CREATE BRANCH (IF NOT EXISTS)? branchName=identifier
+        (AS OF VERSION refMainVersion=versionNumber)?                                           #createBranchRefMain
+    | ALTER TABLE multipartIdentifier CREATE BRANCH (IF NOT EXISTS)? branchName=identifier
+        AS OF BRANCH refBranchName=identifier (VERSION refBranchVersion=versionNumber)?         #createBranchRefBranch
+    | ALTER TABLE multipartIdentifier CREATE BRANCH (IF NOT EXISTS)? branchName=identifier
+        AS OF TAG refTagName=identifier                                                         #createBranchRefTag
+    | ALTER TABLE multipartIdentifier DROP BRANCH (IF EXISTS)? branchName=identifier                         #dropBranch
     | SHOW (BRANCHES | BRANCH) (FROM | IN) multipartIdentifier                                  #showBranches
     | SHOW (INDEXES | INDEX) (FROM | IN) multipartIdentifier                                    #showIndexes
     | OPTIMIZE multipartIdentifier (WITH '(' (namedArgument (',' namedArgument)*)? ')')?        #optimize
@@ -86,16 +86,18 @@ BRANCH: 'BRANCH';
 COLUMNS: 'COLUMNS';
 CREATE: 'CREATE';
 DROP: 'DROP';
+EXISTS: 'EXISTS';
 FROM: 'FROM';
+IF: 'IF';
 IN: 'IN';
 INDEX: 'INDEX';
 INDEXES: 'INDEXES';
 KEY: 'KEY';
 MAIN: 'MAIN';
+NOT: 'NOT';
 OF: 'OF';
 OPTIMIZE: 'OPTIMIZE';
 PRIMARY: 'PRIMARY';
-REF: 'REF';
 SET: 'SET';
 SHOW: 'SHOW';
 TABLE: 'TABLE';
@@ -154,3 +156,5 @@ fragment DIGIT
 fragment LETTER
     : [A-Z]
     ;
+
+

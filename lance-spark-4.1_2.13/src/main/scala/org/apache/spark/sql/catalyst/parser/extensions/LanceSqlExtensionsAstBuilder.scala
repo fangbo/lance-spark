@@ -109,11 +109,14 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
       : CreateBranch = {
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
-    if (ctx.refMainVersion == null) CreateBranch(table, branchName, org.lance.Ref.ofMain())
+    val ifNotExists = ctx.EXISTS() != null
+    if (ctx.refMainVersion == null)
+      CreateBranch(table, branchName, org.lance.Ref.ofMain(), ifNotExists)
     else CreateBranch(
       table,
       branchName,
-      org.lance.Ref.ofMain(java.lang.Long.valueOf(ctx.refMainVersion.getText)))
+      org.lance.Ref.ofMain(java.lang.Long.valueOf(ctx.refMainVersion.getText)),
+      ifNotExists)
   }
 
   override def visitCreateBranchRefBranch(
@@ -121,12 +124,14 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     val refBranchName = cleanIdentifier(ctx.refBranchName.getText)
+    val ifNotExists = ctx.EXISTS() != null
     if (ctx.refBranchVersion == null)
-      CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName))
+      CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName), ifNotExists)
     else CreateBranch(
       table,
       branchName,
-      org.lance.Ref.ofBranch(refBranchName, java.lang.Long.valueOf(ctx.refBranchVersion.getText)))
+      org.lance.Ref.ofBranch(refBranchName, java.lang.Long.valueOf(ctx.refBranchVersion.getText)),
+      ifNotExists)
   }
 
   override def visitCreateBranchRefTag(ctx: LanceSqlExtensionsParser.CreateBranchRefTagContext)
@@ -134,13 +139,15 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     val refTagName = cleanIdentifier(ctx.refTagName.getText)
-    CreateBranch(table, branchName, org.lance.Ref.ofTag(refTagName))
+    val ifNotExists = ctx.EXISTS() != null
+    CreateBranch(table, branchName, org.lance.Ref.ofTag(refTagName), ifNotExists)
   }
 
   override def visitDropBranch(ctx: LanceSqlExtensionsParser.DropBranchContext): DropBranch = {
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
-    DropBranch(table, branchName)
+    val ifExists = ctx.EXISTS() != null
+    DropBranch(table, branchName, ifExists)
   }
 
   override def visitShowBranches(ctx: LanceSqlExtensionsParser.ShowBranchesContext)

@@ -13,14 +13,14 @@ The `DROP BRANCH` command deletes a named branch reference from a Lance table. T
 
 === "SQL"
     ```sql
-    ALTER TABLE <table> DROP BRANCH <branch_name>;
+    ALTER TABLE <table> DROP BRANCH [IF EXISTS] <branch_name>;
     ```
 
 ## Example
 
 === "SQL"
     ```sql
-    ALTER TABLE lance.db.users DROP BRANCH feature_x;
+    ALTER TABLE lance.db.users DROP BRANCH IF EXISTS feature_x;
     ```
 
 ## Output
@@ -35,7 +35,7 @@ The `DROP BRANCH` command returns:
 
 - `DROP BRANCH` is implemented as a Spark SQL extension command.
 - The target table must be a Lance table.
-- Dropping a non-existent branch returns an error.
+- `IF EXISTS` can be used when dropping a branch conditionally.
 - Use [SHOW BRANCHES](./show-branches.md) to inspect existing branches before deleting one.
 
 ## See Also

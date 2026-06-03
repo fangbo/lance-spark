@@ -15,39 +15,46 @@ package org.apache.spark.sql.execution.datasources.v2
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
-import org.apache.spark.sql.catalyst.plans.logical.CreateBranchOutputType
+import org.apache.spark.sql.catalyst.plans.logical.LanceShowBranchesOutputType
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.unsafe.types.UTF8String
-import org.lance.Ref
 import org.lance.spark.LanceDataset
 import org.lance.spark.utils.Utils
 
-case class CreateBranchExec(
-    catalog: TableCatalog,
-    ident: Identifier,
-    branchName: String,
-    ref: org.lance.Ref) extends LeafV2CommandExec {
+import scala.collection.JavaConverters._
 
-  override def output: Seq[Attribute] = CreateBranchOutputType.SCHEMA
+case class LanceShowBranchesExec(
+    catalog: TableCatalog,
+    ident: Identifier) extends LeafV2CommandExec {
+
+  override def output: Seq[Attribute] = LanceShowBranchesOutputType.SCHEMA
 
   override protected def run(): Seq[InternalRow] = {
     val lanceDataset = catalog.loadTable(ident) match {
       case d: LanceDataset => d
-      case _ => throw new UnsupportedOperationException("CreateBranch only supports LanceDataset")
+      case _ => throw new UnsupportedOperationException("ShowBranches only supports LanceDataset")
     }
 
-    val dataset = Utils.openDatasetBuilder(lanceDataset.readOptions()).build()
+    val dataset = Utils.openDatasetBuilder(lanceDataset.readOptions())
+      .initialStorageOptions(lanceDataset.getInitialStorageOptions)
+      .build()
+
     try {
-      val branchDs = dataset.createBranch(
-        branchName,
-        ref,
-        dataset.getLatestStorageOptions)
-      branchDs.close()
+      dataset.branches().list().asScala.map { branch =>
+        val parentBranch = if (branch.getParentBranch.isPresent) {
+          UTF8String.fromString(branch.getParentBranch.get())
+        } else {
+          null
+        }
+        new GenericInternalRow(Array[Any](
+          UTF8String.fromString(branch.getName),
+          parentBranch,
+          branch.getParentVersion(),
+          branch.getCreateAt(),
+          branch.getManifestSize()))
+      }.toSeq
     } finally {
       dataset.close()
     }
-
-    Seq(new GenericInternalRow(Array[Any](
-      UTF8String.fromString(branchName))))
   }
 }

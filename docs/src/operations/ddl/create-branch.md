@@ -22,22 +22,22 @@ Creating a branch records a new reference in table metadata. It does not duplica
 === "SQL"
 
     ```sql
-    ALTER TABLE <table> CREATE BRANCH <branch_name>;
+    ALTER TABLE <table> CREATE BRANCH [IF NOT EXISTS] <branch_name>;
 
-    ALTER TABLE <table> CREATE BRANCH <branch_name>
-    VERSION AS OF REF/MAIN/<version>;
+    ALTER TABLE <table> CREATE BRANCH [IF NOT EXISTS] <branch_name>
+    AS OF VERSION <version>;
 
-    ALTER TABLE <table> CREATE BRANCH <branch_name>
-    VERSION AS OF REF/BRANCH/<source_branch>;
+    ALTER TABLE <table> CREATE BRANCH [IF NOT EXISTS] <branch_name>
+    AS OF BRANCH <source_branch>;
 
-    ALTER TABLE <table> CREATE BRANCH <branch_name>
-    VERSION AS OF REF/BRANCH/<source_branch>/<version>;
+    ALTER TABLE <table> CREATE BRANCH [IF NOT EXISTS] <branch_name>
+    AS OF BRANCH <source_branch> VERSION <version>;
 
-    ALTER TABLE <table> CREATE BRANCH <branch_name>
-    VERSION AS OF REF/TAG/<tag_name>;
+    ALTER TABLE <table> CREATE BRANCH [IF NOT EXISTS] <branch_name>
+    AS OF TAG <tag_name>;
     ```
 
-If the `VERSION AS OF` clause is omitted, the new branch is created from the latest version of `main`.
+If the `AS OF` clause is omitted, the new branch is created from the latest version of `main`.
 
 ## Examples
 
@@ -52,8 +52,8 @@ If the `VERSION AS OF` clause is omitted, the new branch is created from the lat
 
 === "SQL"
     ```sql
-    ALTER TABLE lance.db.users CREATE BRANCH snapshot_v5
-    VERSION AS OF REF/MAIN/5;
+    ALTER TABLE lance.db.users CREATE BRANCH IF NOT EXISTS snapshot_v5
+    AS OF VERSION 5;
     ```
 
 ### Create a branch from another branch head
@@ -61,7 +61,7 @@ If the `VERSION AS OF` clause is omitted, the new branch is created from the lat
 === "SQL"
     ```sql
     ALTER TABLE lance.db.users CREATE BRANCH experiment_b
-    VERSION AS OF REF/BRANCH/experiment_a;
+    AS OF BRANCH experiment_a;
     ```
 
 ### Create a branch from a specific version on another branch
@@ -69,7 +69,7 @@ If the `VERSION AS OF` clause is omitted, the new branch is created from the lat
 === "SQL"
     ```sql
     ALTER TABLE lance.db.users CREATE BRANCH experiment_b_v3
-    VERSION AS OF REF/BRANCH/experiment_a/3;
+    AS OF BRANCH experiment_a VERSION 3;
     ```
 
 ### Create a branch from a tag
@@ -77,7 +77,7 @@ If the `VERSION AS OF` clause is omitted, the new branch is created from the lat
 === "SQL"
     ```sql
     ALTER TABLE lance.db.users CREATE BRANCH release_fix
-    VERSION AS OF REF/TAG/release_candidate;
+    AS OF TAG release_candidate;
     ```
 
 ## Output

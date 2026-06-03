@@ -17,26 +17,27 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference}
 import org.apache.spark.sql.types.{DataTypes, StructField, StructType}
 import org.lance.Ref
 
-case class CreateBranch(
+case class LanceCreateBranch(
     table: LogicalPlan,
     branchName: String,
-    ref: Ref) extends Command {
+    ref: Ref,
+    ifNotExists: Boolean = false) extends Command {
 
   override def children: Seq[LogicalPlan] = Seq(table)
 
-  override def output: Seq[Attribute] = CreateBranchOutputType.SCHEMA
+  override def output: Seq[Attribute] = LanceCreateBranchOutputType.SCHEMA
 
   override def simpleString(maxFields: Int): String = {
-    s"CreateBranch(${branchName} VERSION AS OF ${ref})"
+    s"CreateBranch(${branchName}, ${ref}, ifNotExists=${ifNotExists})"
   }
 
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan])
-      : CreateBranch = {
-    copy(newChildren(0), this.branchName, this.ref)
+      : LanceCreateBranch = {
+    copy(newChildren(0), this.branchName, this.ref, this.ifNotExists)
   }
 }
 
-object CreateBranchOutputType {
+object LanceCreateBranchOutputType {
   val SCHEMA = StructType(
     Array(
       StructField("name", DataTypes.StringType, nullable = false)))

@@ -15,18 +15,21 @@ package org.apache.spark.sql.execution.datasources.v2
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GenericInternalRow}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateBranchOutputType, DropBranchOutputType}
+import org.apache.spark.sql.catalyst.plans.logical.LanceDropBranchOutputType
 import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.unsafe.types.UTF8String
 import org.lance.spark.LanceDataset
 import org.lance.spark.utils.Utils
 
-case class DropBranchExec(
+import scala.collection.JavaConverters._
+
+case class LanceDropBranchExec(
     catalog: TableCatalog,
     ident: Identifier,
-    branchName: String) extends LeafV2CommandExec {
+    branchName: String,
+    ifExists: Boolean) extends LeafV2CommandExec {
 
-  override def output: Seq[Attribute] = DropBranchOutputType.SCHEMA
+  override def output: Seq[Attribute] = LanceDropBranchOutputType.SCHEMA
 
   override protected def run(): Seq[InternalRow] = {
     val lanceDataset = catalog.loadTable(ident) match {
@@ -34,9 +37,15 @@ case class DropBranchExec(
       case _ => throw new UnsupportedOperationException("DropBranch only supports LanceDataset")
     }
 
-    val dataset = Utils.openDatasetBuilder(lanceDataset.readOptions()).build()
+    val dataset = Utils.openDatasetBuilder(lanceDataset.readOptions())
+      .initialStorageOptions(lanceDataset.getInitialStorageOptions)
+      .build()
+
     try {
-      dataset.branches().delete(branchName)
+      val exists = dataset.branches().list().asScala.exists(_.getName == branchName)
+      if (!ifExists || exists) {
+        dataset.branches().delete(branchName)
+      }
     } finally {
       dataset.close()
     }

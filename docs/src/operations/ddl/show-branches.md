@@ -41,13 +41,13 @@ Both plural and singular forms are accepted. Both `FROM` and `IN` are accepted.
 
 The `SHOW BRANCHES` command returns the following columns:
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `name` | String | Branch name |
-| `parent_branch` | String | Source branch name if the branch was created from another branch; otherwise empty |
-| `parent_version` | Long | Version used as the branch starting point |
-| `create_at` | Long | Branch creation timestamp as returned by Lance metadata |
-| `manifest_size` | Integer | Manifest size recorded for the branch |
+| Column | Type | Description                                                                      |
+|--------|------|----------------------------------------------------------------------------------|
+| `name` | String | Branch name                                                                      |
+| `parent_branch` | String | Source branch name if the branch was created from another branch; otherwise NULL |
+| `parent_version` | Long | Version used as the branch starting point                                        |
+| `created_at` | Long | Branch creation timestamp as returned by Lance metadata                          |
+| `manifest_size` | Integer | Manifest size recorded for the branch                                            |
 
 ## Notes
 

@@ -29,7 +29,7 @@ statement
         AS OF BRANCH refBranchName=identifier (VERSION refBranchVersion=versionNumber)?         #createBranchRefBranch
     | ALTER TABLE multipartIdentifier CREATE BRANCH (IF NOT EXISTS)? branchName=identifier
         AS OF TAG refTagName=identifier                                                         #createBranchRefTag
-    | ALTER TABLE multipartIdentifier DROP BRANCH (IF EXISTS)? branchName=identifier                         #dropBranch
+    | ALTER TABLE multipartIdentifier DROP BRANCH (IF EXISTS)? branchName=identifier            #dropBranch
     | SHOW (BRANCHES | BRANCH) (FROM | IN) multipartIdentifier                                  #showBranches
     | SHOW (INDEXES | INDEX) (FROM | IN) multipartIdentifier                                    #showIndexes
     | OPTIMIZE multipartIdentifier (WITH '(' (namedArgument (',' namedArgument)*)? ')')?        #optimize

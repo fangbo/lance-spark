@@ -15,7 +15,7 @@ package org.apache.spark.sql.catalyst.parser.extensions
 
 import org.apache.spark.sql.catalyst.analysis.{UnresolvedIdentifier, UnresolvedRelation}
 import org.apache.spark.sql.catalyst.parser.ParserInterface
-import org.apache.spark.sql.catalyst.plans.logical.{AddColumnsBackfill, AddIndex, CreateBranch, DropBranch, LanceDropIndex, LanceNamedArgument, LogicalPlan, Optimize, SetUnenforcedPrimaryKey, ShowBranches, ShowIndexes, UpdateColumnsBackfill, Vacuum}
+import org.apache.spark.sql.catalyst.plans.logical.{AddColumnsBackfill, AddIndex, LanceCreateBranch, LanceDropBranch, LanceDropIndex, LanceNamedArgument, LanceShowBranches, LogicalPlan, Optimize, SetUnenforcedPrimaryKey, ShowIndexes, UpdateColumnsBackfill, Vacuum}
 import org.lance.spark.utils.ParserUtils
 
 import scala.jdk.CollectionConverters._
@@ -106,13 +106,13 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
   }
 
   override def visitCreateBranchRefMain(ctx: LanceSqlExtensionsParser.CreateBranchRefMainContext)
-      : CreateBranch = {
+      : LanceCreateBranch = {
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     val ifNotExists = ctx.EXISTS() != null
     if (ctx.refMainVersion == null)
-      CreateBranch(table, branchName, org.lance.Ref.ofMain(), ifNotExists)
-    else CreateBranch(
+      LanceCreateBranch(table, branchName, org.lance.Ref.ofMain(), ifNotExists)
+    else LanceCreateBranch(
       table,
       branchName,
       org.lance.Ref.ofMain(java.lang.Long.valueOf(ctx.refMainVersion.getText)),
@@ -120,14 +120,14 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
   }
 
   override def visitCreateBranchRefBranch(
-      ctx: LanceSqlExtensionsParser.CreateBranchRefBranchContext): CreateBranch = {
+      ctx: LanceSqlExtensionsParser.CreateBranchRefBranchContext): LanceCreateBranch = {
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     val refBranchName = cleanIdentifier(ctx.refBranchName.getText)
     val ifNotExists = ctx.EXISTS() != null
     if (ctx.refBranchVersion == null)
-      CreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName), ifNotExists)
-    else CreateBranch(
+      LanceCreateBranch(table, branchName, org.lance.Ref.ofBranch(refBranchName), ifNotExists)
+    else LanceCreateBranch(
       table,
       branchName,
       org.lance.Ref.ofBranch(refBranchName, java.lang.Long.valueOf(ctx.refBranchVersion.getText)),
@@ -135,25 +135,25 @@ class LanceSqlExtensionsAstBuilder(delegate: ParserInterface)
   }
 
   override def visitCreateBranchRefTag(ctx: LanceSqlExtensionsParser.CreateBranchRefTagContext)
-      : CreateBranch = {
+      : LanceCreateBranch = {
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     val refTagName = cleanIdentifier(ctx.refTagName.getText)
     val ifNotExists = ctx.EXISTS() != null
-    CreateBranch(table, branchName, org.lance.Ref.ofTag(refTagName), ifNotExists)
+    LanceCreateBranch(table, branchName, org.lance.Ref.ofTag(refTagName), ifNotExists)
   }
 
-  override def visitDropBranch(ctx: LanceSqlExtensionsParser.DropBranchContext): DropBranch = {
+  override def visitDropBranch(ctx: LanceSqlExtensionsParser.DropBranchContext): LanceDropBranch = {
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
     val branchName = cleanIdentifier(ctx.branchName.getText)
     val ifExists = ctx.EXISTS() != null
-    DropBranch(table, branchName, ifExists)
+    LanceDropBranch(table, branchName, ifExists)
   }
 
   override def visitShowBranches(ctx: LanceSqlExtensionsParser.ShowBranchesContext)
-      : ShowBranches = {
+      : LanceShowBranches = {
     val table = UnresolvedIdentifier(visitMultipartIdentifier(ctx.multipartIdentifier()))
-    ShowBranches(table)
+    LanceShowBranches(table)
   }
 
   override def visitSetUnenforcedPrimaryKey(

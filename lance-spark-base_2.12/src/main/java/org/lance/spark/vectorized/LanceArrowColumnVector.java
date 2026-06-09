@@ -15,9 +15,15 @@ package org.lance.spark.vectorized;
 
 import org.lance.spark.utils.BlobUtils;
 
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.DateMilliVector;
+import org.apache.arrow.vector.DecimalVector;
 import org.apache.arrow.vector.FixedSizeBinaryVector;
 import org.apache.arrow.vector.LargeVarCharVector;
+import org.apache.arrow.vector.TimeMicroVector;
+import org.apache.arrow.vector.TimeMilliVector;
+import org.apache.arrow.vector.TimeNanoVector;
+import org.apache.arrow.vector.TimeSecVector;
 import org.apache.arrow.vector.TimeStampMilliTZVector;
 import org.apache.arrow.vector.TimeStampMilliVector;
 import org.apache.arrow.vector.TimeStampNanoTZVector;
@@ -34,7 +40,9 @@ import org.apache.arrow.vector.complex.LargeListVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
+import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.Decimal;
+import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.util.LanceArrowUtils;
 import org.apache.spark.sql.vectorized.ArrowColumnVector;
 import org.apache.spark.sql.vectorized.ColumnVector;
@@ -57,16 +65,26 @@ public class LanceArrowColumnVector extends ColumnVector {
   private Float2Accessor float2Accessor;
   private DateMilliAccessor dateMilliAccessor;
   private TimestampUnitAccessor timestampUnitAccessor;
+  private TimeUnitAccessor timeUnitAccessor;
   private LanceStructAccessor structAccessor;
+  private LanceDecimalAccessor decimalAccessor;
   private ArrowColumnVector arrowColumnVector;
   private final boolean closeVectorOnClose;
 
   public LanceArrowColumnVector(ValueVector vector) {
-    this(vector, true);
+    this(vector, true, null);
   }
 
   public LanceArrowColumnVector(ValueVector vector, boolean closeVectorOnClose) {
-    super(LanceArrowUtils.fromArrowField(vector.getField()));
+    this(vector, closeVectorOnClose, null);
+  }
+
+  public LanceArrowColumnVector(
+      ValueVector vector, boolean closeVectorOnClose, StructField sparkField) {
+    super(
+        BlobUtils.isBlobV2SparkField(sparkField)
+            ? BlobUtils.BLOB_DESCRIPTOR_STRUCT
+            : computeDataType(vector));
     this.closeVectorOnClose = closeVectorOnClose;
 
     if (vector instanceof UInt1Vector) {
@@ -81,6 +99,8 @@ public class LanceArrowColumnVector extends ColumnVector {
       fixedSizeBinaryAccessor = new FixedSizeBinaryAccessor((FixedSizeBinaryVector) vector);
     } else if (vector instanceof FixedSizeListVector) {
       fixedSizeListAccessor = new FixedSizeListAccessor((FixedSizeListVector) vector);
+    } else if (vector instanceof StructVector && BlobUtils.isBlobV2SparkField(sparkField)) {
+      structAccessor = new LanceStructAccessor((StructVector) vector);
     } else if (vector instanceof StructVector && BlobUtils.isBlobArrowField(vector.getField())) {
       blobStructAccessor = new BlobStructAccessor((StructVector) vector);
     } else if (vector instanceof StructVector) {
@@ -108,8 +128,22 @@ public class LanceArrowColumnVector extends ColumnVector {
       timestampUnitAccessor = new TimestampUnitAccessor((TimeStampNanoVector) vector, 1L, 1_000L);
     } else if (vector instanceof TimeStampNanoTZVector) {
       timestampUnitAccessor = new TimestampUnitAccessor((TimeStampNanoTZVector) vector, 1L, 1_000L);
+    } else if (vector instanceof TimeNanoVector) {
+      // Spark 4.1 TimeType stores nanos internally; Arrow TimeNano also nanos
+      timeUnitAccessor = new TimeUnitAccessor((TimeNanoVector) vector, 1L, 1L);
+    } else if (vector instanceof TimeMicroVector) {
+      // Arrow TimeMicro stores micros; Spark expects nanos → multiply by 1_000
+      timeUnitAccessor = new TimeUnitAccessor((TimeMicroVector) vector, 1_000L, 1L);
+    } else if (vector instanceof TimeMilliVector) {
+      // Arrow TimeMilli stores millis; Spark expects nanos → multiply by 1_000_000
+      timeUnitAccessor = new TimeUnitAccessor((TimeMilliVector) vector, 1_000_000L, 1L);
+    } else if (vector instanceof TimeSecVector) {
+      // Arrow TimeSec stores seconds; Spark expects nanos → multiply by 1_000_000_000
+      timeUnitAccessor = new TimeUnitAccessor((TimeSecVector) vector, 1_000_000_000L, 1L);
     } else if (vector instanceof DateMilliVector) {
       dateMilliAccessor = new DateMilliAccessor((DateMilliVector) vector);
+    } else if (vector instanceof DecimalVector) {
+      decimalAccessor = new LanceDecimalAccessor((DecimalVector) vector);
     } else if (vector.getClass().getName().equals("org.apache.arrow.vector.Float2Vector")) {
       // Float2Vector is only available in Arrow 18+ (Spark 4.0+).
       // Use class name check to avoid compile-time dependency.
@@ -166,8 +200,14 @@ public class LanceArrowColumnVector extends ColumnVector {
     if (timestampUnitAccessor != null) {
       timestampUnitAccessor.close();
     }
+    if (timeUnitAccessor != null) {
+      timeUnitAccessor.close();
+    }
     if (structAccessor != null) {
       structAccessor.close();
+    }
+    if (decimalAccessor != null) {
+      decimalAccessor.close();
     }
     if (arrowColumnVector != null) {
       arrowColumnVector.close();
@@ -218,8 +258,14 @@ public class LanceArrowColumnVector extends ColumnVector {
     if (timestampUnitAccessor != null) {
       return timestampUnitAccessor.getNullCount() > 0;
     }
+    if (timeUnitAccessor != null) {
+      return timeUnitAccessor.getNullCount() > 0;
+    }
     if (structAccessor != null) {
       return structAccessor.getNullCount() > 0;
+    }
+    if (decimalAccessor != null) {
+      return decimalAccessor.getNullCount() > 0;
     }
     if (arrowColumnVector != null) {
       return arrowColumnVector.hasNull();
@@ -271,8 +317,14 @@ public class LanceArrowColumnVector extends ColumnVector {
     if (timestampUnitAccessor != null) {
       return timestampUnitAccessor.getNullCount();
     }
+    if (timeUnitAccessor != null) {
+      return timeUnitAccessor.getNullCount();
+    }
     if (structAccessor != null) {
       return structAccessor.getNullCount();
+    }
+    if (decimalAccessor != null) {
+      return decimalAccessor.getNullCount();
     }
     if (arrowColumnVector != null) {
       return arrowColumnVector.numNulls();
@@ -324,8 +376,14 @@ public class LanceArrowColumnVector extends ColumnVector {
     if (timestampUnitAccessor != null) {
       return timestampUnitAccessor.isNullAt(rowId);
     }
+    if (timeUnitAccessor != null) {
+      return timeUnitAccessor.isNullAt(rowId);
+    }
     if (structAccessor != null) {
       return structAccessor.isNullAt(rowId);
+    }
+    if (decimalAccessor != null) {
+      return decimalAccessor.isNullAt(rowId);
     }
     if (arrowColumnVector != null) {
       return arrowColumnVector.isNullAt(rowId);
@@ -385,6 +443,9 @@ public class LanceArrowColumnVector extends ColumnVector {
     if (timestampUnitAccessor != null) {
       return timestampUnitAccessor.getLong(rowId);
     }
+    if (timeUnitAccessor != null) {
+      return timeUnitAccessor.getLong(rowId);
+    }
     if (arrowColumnVector != null) {
       return arrowColumnVector.getLong(rowId);
     }
@@ -440,6 +501,9 @@ public class LanceArrowColumnVector extends ColumnVector {
 
   @Override
   public Decimal getDecimal(int rowId, int precision, int scale) {
+    if (decimalAccessor != null) {
+      return decimalAccessor.getDecimal(rowId, precision, scale);
+    }
     if (arrowColumnVector != null) {
       return arrowColumnVector.getDecimal(rowId, precision, scale);
     }
@@ -489,5 +553,52 @@ public class LanceArrowColumnVector extends ColumnVector {
    */
   public BlobStructAccessor getBlobStructAccessor() {
     return blobStructAccessor;
+  }
+
+  private static DataType computeDataType(ValueVector vector) {
+    return LanceArrowUtils.fromArrowField(vector.getField());
+  }
+
+  private static class LanceDecimalAccessor {
+    private static final int DECIMAL128_BYTE_WIDTH = 16;
+    private final DecimalVector vector;
+    private final ArrowBuf dataBuffer;
+    private final boolean useFastPath;
+
+    LanceDecimalAccessor(DecimalVector vector) {
+      this.vector = vector;
+      this.dataBuffer = vector.getDataBuffer();
+      this.useFastPath = vector.getPrecision() <= 18;
+    }
+
+    boolean isNullAt(int rowId) {
+      return vector.isNull(rowId);
+    }
+
+    int getNullCount() {
+      return vector.getNullCount();
+    }
+
+    void close() {
+      vector.close();
+    }
+
+    Decimal getDecimal(int rowId, int precision, int scale) {
+      if (vector.isNull(rowId)) {
+        return null;
+      }
+      if (useFastPath) {
+        // precision <= 18 mathematically guarantees the unscaled value fits in
+        // [-10^18+1, 10^18-1] ⊂ [-2^63, 2^63), so the i128 high 8 bytes are
+        // always sign-extension of the i64 low 8 bytes. Skip the high read +
+        // overflow branch — saves ~30% per-call cost on the decimal hot path.
+        // Use Decimal.createUnsafe to skip precision/scale validation (same
+        // path Spark's Parquet vectorized reader takes); schema already
+        // guarantees the value is within the declared (precision, scale).
+        long offset = (long) rowId * DECIMAL128_BYTE_WIDTH;
+        return Decimal.createUnsafe(dataBuffer.getLong(offset), precision, scale);
+      }
+      return Decimal.apply(vector.getObject(rowId), precision, scale);
+    }
   }
 }

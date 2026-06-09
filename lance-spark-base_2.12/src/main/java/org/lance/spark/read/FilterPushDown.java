@@ -29,6 +29,7 @@ import java.sql.Date;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 public class FilterPushDown {
@@ -54,25 +55,18 @@ public class FilterPushDown {
     return Optional.of(whereClause);
   }
 
-  /**
-   * @param predicates predicates to check for Lance push-down support
-   * @return accepted push-down predicates (row 0) and rejected post-scan predicates (row 1)
-   */
-  public static Predicate[][] processPredicates(Predicate[] predicates) {
-    List<Predicate> accepted = new ArrayList<>();
-    List<Predicate> rejected = new ArrayList<>();
-
-    for (Predicate predicate : predicates) {
-      if (isPredicateSupported(predicate)) {
-        accepted.add(predicate);
-      } else {
-        rejected.add(predicate);
+  /** Returns true if {@code predicate} references any of the given top-level columns. */
+  public static boolean referencesAny(Predicate predicate, Set<String> columns) {
+    if (columns.isEmpty()) {
+      return false;
+    }
+    for (NamedReference ref : predicate.references()) {
+      String[] names = ref.fieldNames();
+      if (names.length > 0 && columns.contains(names[0])) {
+        return true;
       }
     }
-
-    return new Predicate[][] {
-      accepted.toArray(new Predicate[0]), rejected.toArray(new Predicate[0])
-    };
+    return false;
   }
 
   public static boolean isPredicateSupported(Predicate predicate) {
@@ -115,8 +109,24 @@ public class FilterPushDown {
       if (!(children[i] instanceof Literal)) {
         return false;
       }
+      if (isTimeTypeLiteral((Literal<?>) children[i])) {
+        // Lance's custom SQL planner (lance-datafusion/src/planner.rs) does not yet support
+        // SQLDataType::Time in parse_type(), so TimeType literals can't be pushed down. Reject
+        // and let Spark evaluate the predicate post-scan.
+        return false;
+      }
     }
     return true;
+  }
+
+  /**
+   * Detects a Spark TimeType literal via class name to stay version-safe — {@code TimeType} only
+   * exists in Spark 4.1+, so a direct {@code instanceof TimeType} would not compile against older
+   * Spark versions in the base module.
+   */
+  private static boolean isTimeTypeLiteral(Literal<?> literal) {
+    return literal.dataType() != null
+        && "org.apache.spark.sql.types.TimeType".equals(literal.dataType().getClass().getName());
   }
 
   private static Optional<String> compilePredicate(Predicate predicate) {

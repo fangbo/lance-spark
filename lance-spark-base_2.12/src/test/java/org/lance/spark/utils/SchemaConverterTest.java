@@ -13,9 +13,14 @@
  */
 package org.lance.spark.utils;
 
+import com.google.common.collect.ImmutableMap;
+import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+import org.apache.spark.sql.util.LanceArrowUtils;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -138,8 +143,8 @@ public class SchemaConverterTest {
             });
     Map<String, String> properties = new HashMap<>();
     properties.put("text.lance.encoding", "blob");
-    assertThrows(
-        IllegalArgumentException.class,
+    assertValidationFailure(
+        "must have BINARY type",
         () -> SchemaConverter.processSchemaWithProperties(schema, properties));
   }
 
@@ -489,6 +494,88 @@ public class SchemaConverterTest {
   }
 
   @Test
+  public void testProcessSchemaAddsFixedSizeBinaryMetadata() {
+    StructType schema =
+        new StructType(
+            new StructField[] {
+              DataTypes.createStructField("id", DataTypes.IntegerType, false),
+              DataTypes.createStructField("hash", DataTypes.BinaryType, true),
+            });
+    Map<String, String> properties = new HashMap<>();
+    properties.put("hash.arrow.fixed-size-binary.byte-width", "16");
+
+    StructType result = SchemaConverter.processSchemaWithProperties(schema, properties);
+    StructField hashField = result.apply("hash");
+    // Spark type must remain BinaryType — Spark has no FixedSizeBinary — only the metadata changes.
+    assertEquals(DataTypes.BinaryType, hashField.dataType());
+    assertTrue(hashField.nullable());
+    assertTrue(
+        hashField.metadata().contains(FixedSizeBinaryUtils.ARROW_FIXED_SIZE_BINARY_BYTE_WIDTH_KEY));
+    assertEquals(
+        16L,
+        hashField.metadata().getLong(FixedSizeBinaryUtils.ARROW_FIXED_SIZE_BINARY_BYTE_WIDTH_KEY));
+  }
+
+  @Test
+  public void testFixedSizeBinaryMetadataRejectsNonBinaryType() {
+    StructType schema =
+        new StructType(
+            new StructField[] {
+              DataTypes.createStructField("name", DataTypes.StringType, true),
+            });
+    Map<String, String> properties = new HashMap<>();
+    properties.put("name.arrow.fixed-size-binary.byte-width", "16");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> SchemaConverter.processSchemaWithProperties(schema, properties));
+  }
+
+  @Test
+  public void testFixedSizeBinaryMetadataRejectsNonNumericWidth() {
+    StructType schema =
+        new StructType(
+            new StructField[] {DataTypes.createStructField("hash", DataTypes.BinaryType, true)});
+    Map<String, String> properties = new HashMap<>();
+    properties.put("hash.arrow.fixed-size-binary.byte-width", "sixteen");
+    IllegalArgumentException ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> SchemaConverter.processSchemaWithProperties(schema, properties));
+    // Error must include the column name so users can locate the bad property.
+    assertTrue(
+        ex.getMessage().contains("hash"), "error must name the column; got: " + ex.getMessage());
+  }
+
+  @Test
+  public void testFixedSizeBinaryMetadataRejectsZeroAndNegativeWidth() {
+    StructType schema =
+        new StructType(
+            new StructField[] {DataTypes.createStructField("hash", DataTypes.BinaryType, true)});
+    for (String bad : new String[] {"0", "-1", "-16"}) {
+      Map<String, String> properties = new HashMap<>();
+      properties.put("hash.arrow.fixed-size-binary.byte-width", bad);
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> SchemaConverter.processSchemaWithProperties(schema, properties),
+          "byte-width=" + bad + " must be rejected");
+    }
+  }
+
+  @Test
+  public void testFixedSizeBinaryMetadataRejectsOverflowWidth() {
+    // Arrow's FixedSizeBinary stores byte width as int; reject values that would overflow int.
+    StructType schema =
+        new StructType(
+            new StructField[] {DataTypes.createStructField("hash", DataTypes.BinaryType, true)});
+    Map<String, String> properties = new HashMap<>();
+    properties.put(
+        "hash.arrow.fixed-size-binary.byte-width", String.valueOf((long) Integer.MAX_VALUE + 1L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> SchemaConverter.processSchemaWithProperties(schema, properties));
+  }
+
+  @Test
   public void testNegativeCompressionLevelThrows() {
     StructType schema =
         new StructType(
@@ -500,5 +587,111 @@ public class SchemaConverterTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> SchemaConverter.processSchemaWithProperties(schema, properties));
+  }
+
+  @Test
+  public void testBlobV2ArrowSchemaUsesWriteStruct() {
+    StructType sparkSchema = blobSchemaWithVersion("2.2");
+
+    assertBlobV2Field(sparkSchema.apply("data"));
+
+    Schema arrowSchema = LanceArrowUtils.toArrowSchema(sparkSchema, "UTC", true);
+    Field contentField = arrowSchema.findField("data");
+
+    assertNotNull(contentField);
+    assertInstanceOf(ArrowType.Struct.class, contentField.getType());
+    assertEquals(
+        BlobUtils.ARROW_EXTENSION_BLOB_V2,
+        contentField.getMetadata().get(BlobUtils.ARROW_EXTENSION_NAME_KEY));
+  }
+
+  @Test
+  public void testBlobV1WithUnsupportedVersion() {
+    // v2 only supported on 2.2 or higher
+    assertBlobV1Field(blobSchemaWithVersion("2.1").apply("data"));
+  }
+
+  @Test
+  public void testBlobV1WhenVersionNull() {
+    assertBlobV1Field(blobSchemaWithVersion(null).apply("data"));
+  }
+
+  @Test
+  public void testBlobEncodingRequiresColumnProperty() {
+    StructType schema =
+        new StructType(
+            new StructField[] {
+              DataTypes.createStructField("data", DataTypes.BinaryType, true),
+            });
+    Map<String, String> properties = ImmutableMap.of("file_format_version", "2.2");
+    StructField field =
+        SchemaConverter.processSchemaWithProperties(schema, properties, "2.2").apply("data");
+
+    assertFalse(field.metadata().contains(BlobUtils.LANCE_ENCODING_BLOB_KEY));
+    assertFalse(field.metadata().contains(BlobUtils.ARROW_EXTENSION_NAME_KEY));
+  }
+
+  @Test
+  public void testBlobEncodingRejectsUnknownFileFormatVersion() {
+    StructType schema =
+        new StructType(
+            new StructField[] {
+              DataTypes.createStructField("data", DataTypes.BinaryType, true),
+            });
+    Map<String, String> properties = ImmutableMap.of("data.lance.encoding", "blob");
+
+    assertValidationFailure(
+        "Blob columns require a numeric file_format_version like '2.2'. Got: 'stable'.",
+        () -> SchemaConverter.processSchemaWithProperties(schema, properties, "stable"));
+  }
+
+  @Test
+  public void testBlobEncodingRejectsMalformedFileFormatVersion() {
+    StructType schema =
+        new StructType(
+            new StructField[] {
+              DataTypes.createStructField("data", DataTypes.BinaryType, true),
+            });
+    Map<String, String> properties = ImmutableMap.of("data.lance.encoding", "blob");
+
+    assertValidationFailure(
+        "numeric file_format_version",
+        () -> SchemaConverter.processSchemaWithProperties(schema, properties, "2.x"));
+  }
+
+  private static StructType blobSchemaWithVersion(String fileFormatVersion) {
+    StructType schema =
+        new StructType(
+            new StructField[] {
+              DataTypes.createStructField("id", DataTypes.IntegerType, false),
+              DataTypes.createStructField("data", DataTypes.BinaryType, true),
+            });
+    Map<String, String> properties = ImmutableMap.of("data.lance.encoding", "blob");
+
+    return SchemaConverter.processSchemaWithProperties(schema, properties, fileFormatVersion);
+  }
+
+  private static void assertBlobV1Field(StructField field) {
+    assertEquals(DataTypes.BinaryType, field.dataType());
+    assertTrue(field.metadata().contains(BlobUtils.LANCE_ENCODING_BLOB_KEY));
+    assertEquals(
+        BlobUtils.LANCE_ENCODING_BLOB_VALUE,
+        field.metadata().getString(BlobUtils.LANCE_ENCODING_BLOB_KEY));
+    assertFalse(field.metadata().contains(BlobUtils.ARROW_EXTENSION_NAME_KEY));
+  }
+
+  private static void assertBlobV2Field(StructField field) {
+    assertEquals(DataTypes.BinaryType, field.dataType());
+    assertEquals(
+        BlobUtils.ARROW_EXTENSION_BLOB_V2,
+        field.metadata().getString(BlobUtils.ARROW_EXTENSION_NAME_KEY));
+    assertFalse(field.metadata().contains(BlobUtils.LANCE_ENCODING_BLOB_KEY));
+  }
+
+  private static void assertValidationFailure(String expectedFragment, Runnable action) {
+    IllegalArgumentException e = assertThrows(IllegalArgumentException.class, action::run);
+    assertTrue(
+        e.getMessage().contains(expectedFragment),
+        () -> "expected message to contain '" + expectedFragment + "': " + e.getMessage());
   }
 }

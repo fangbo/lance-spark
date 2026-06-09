@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Timestamp;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -216,5 +217,41 @@ public class FilterPushDownTest {
     Optional<String> whereClause = FilterPushDown.compileFiltersToSqlWhereClause(filters);
     assertTrue(whereClause.isPresent());
     assertEquals("(created_at == timestamp '2024-01-15 10:30:00.0')", whereClause.get());
+  }
+
+  @Test
+  public void testTimeTypeFilterRejected() throws Exception {
+    // TimeType literals must be rejected from pushdown because Lance's DataFusion planner does
+    // not yet support SQLDataType::Time in parse_type(). TimeType exists only in Spark 4.1+,
+    // so we construct it via reflection and skip the assertion on older versions.
+    org.apache.spark.sql.types.DataType timeType;
+    try {
+      Class<?> timeTypeClass = Class.forName("org.apache.spark.sql.types.TimeType");
+      timeType =
+          (org.apache.spark.sql.types.DataType)
+              timeTypeClass.getDeclaredConstructor(int.class).newInstance(6);
+    } catch (ClassNotFoundException e) {
+      return; // Spark < 4.1: nothing to test.
+    }
+
+    org.apache.spark.sql.connector.expressions.LiteralValue<Long> timeLit =
+        new org.apache.spark.sql.connector.expressions.LiteralValue<>(0L, timeType);
+    Predicate timeGt =
+        new Predicate(
+            ">",
+            new org.apache.spark.sql.connector.expressions.Expression[] {
+              org.apache.spark.sql.connector.expressions.FieldReference.apply("t"), timeLit
+            });
+    assertFalse(FilterPushDown.isPredicateSupported(timeGt));
+
+    Predicate intGt = TestPredicates.gt("age", 30);
+    assertTrue(FilterPushDown.isPredicateSupported(intGt));
+  }
+
+  @Test
+  public void testReferencesAnyMatchesTopLevelColumn() {
+    Predicate onPayload = TestPredicates.gt("payload", 1L);
+    assertTrue(FilterPushDown.referencesAny(onPayload, Collections.singleton("payload")));
+    assertFalse(FilterPushDown.referencesAny(onPayload, Collections.singleton("id")));
   }
 }

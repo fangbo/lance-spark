@@ -44,11 +44,29 @@ import scala.collection.JavaConverters._
 /**
  * Physical execution of distributed CREATE INDEX (ALTER TABLE ... CREATE INDEX ...) for Lance datasets.
  *
+ * <p>Index creation behaviour is controlled by the WITH clause options:
  * <ul>
- * <li>For zonemap index, it builds uncommitted index segments in parallel and commits the logical index on the driver.
- * <li>For BTREE index, range mode redistributes and sorts data across partitions, creates indexes for each range in parallel, and finally merges them into a global index structure.
- * <li>For fragment-trainable scalar index types (BTREE fragment mode, FTS, etc.), it processes each fragment independently in parallel, merges index metadata and commits an index-creation transaction.
+ * <li><b>BTREE</b>: uses a range-based approach that redistributes and sorts data across
+ *   partitions, creates indexes for each range in parallel, and merges them into a global
+ *   index structure. Supports {@code build_mode='range'} (default) and
+ *   {@code build_mode='fragment'}.
+ * <li><b>FTS / INVERTED</b>: processes each fragment independently in parallel, merges index
+ *   metadata, and commits an index-creation transaction.
+ * <li><b>ZONEMAP</b>: builds uncommitted index segments in parallel across fragment batches
+ *   and commits the logical index on the driver.
  * </ul>
+ *
+ * <p><b>Deferred training ({@code WITH (train=false)})</b>: commits an empty index on the driver
+ * with an empty fragment bitmap (all rows appear unindexed), skipping data processing. Supported
+ * for all index types; ignored for empty tables. Populate it later by re-running {@code CREATE
+ * INDEX} with the same name (a full distributed build that replaces the empty index) or, for
+ * incremental coverage of appended fragments, by {@code Dataset.optimizeIndices} (the SQL
+ * {@code OPTIMIZE} only compacts fragments). {@code num_segments} is rejected with this option,
+ * since no segmented build occurs.
+ *
+ * <p>The following options are consumed at the Spark execution layer and are never forwarded
+ * to the Lance index backend: {@code train}, {@code build_mode}, {@code rows_per_range},
+ * {@code num_segments}.
  */
 case class AddIndexExec(
     catalog: TableCatalog,
@@ -88,6 +106,7 @@ case class AddIndexExec(
       return Seq(new GenericInternalRow(Array[Any](0L, UTF8String.fromString(indexName))))
     }
 
+    val train = IndexUtils.extractTrain(args)
     val indexType = IndexUtils.buildIndexType(method)
 
     if (indexType == IndexType.ZONEMAP && canonicalColumns.size != 1) {
@@ -103,6 +122,10 @@ case class AddIndexExec(
       throw new IllegalArgumentException(
         "num_segments option is only supported for index types that use segmented builds (e.g., zonemap)")
     }
+    if (numSegmentsOpt.isDefined && !train) {
+      throw new IllegalArgumentException(
+        "num_segments is not supported with train=false: a deferred index performs no segmented build")
+    }
     val validatedNumSegments: Option[Int] = numSegmentsOpt.map { arg =>
       arg.value match {
         case null =>
@@ -117,6 +140,24 @@ case class AddIndexExec(
         case other =>
           throw new IllegalArgumentException(
             s"num_segments must be a positive integer, got: $other")
+      }
+    }
+
+    // train=false: commit an empty index on the driver for any index type,
+    // skipping all data processing. See the class doc for how it is populated.
+    if (!train) {
+      val uuid = UUID.randomUUID()
+      val dataset = Utils.openDatasetBuilder(readOptions).build()
+      try {
+        return commitEmptyIndex(
+          dataset,
+          readOptions,
+          indexName,
+          indexType,
+          canonicalColumns,
+          uuid)
+      } finally {
+        dataset.close()
       }
     }
 
@@ -248,6 +289,70 @@ case class AddIndexExec(
     Seq(new GenericInternalRow(Array[Any](
       fragmentIds.size.toLong,
       UTF8String.fromString(indexName))))
+  }
+
+  /** Commits an empty (untrained) index on the driver, with an empty fragment bitmap. */
+  private def commitEmptyIndex(
+      dataset: Dataset,
+      readOptions: LanceSparkReadOptions,
+      indexName: String,
+      indexType: IndexType,
+      canonicalColumns: Seq[String],
+      uuid: UUID): Seq[InternalRow] = {
+    val argsJson = IndexUtils.toJson(args)
+    val params = IndexParams.builder()
+      .setScalarIndexParams(
+        ScalarIndexParams.create(IndexUtils.buildScalarIndexParamType(method), argsJson))
+      .build()
+    val opts = IndexOptions
+      .builder(canonicalColumns.asJava, indexType, params)
+      .replace(true)
+      .withIndexName(indexName)
+      .withIndexUUID(uuid.toString)
+      .train(false)
+      .build()
+
+    val emptyIndex = dataset.createIndex(opts)
+
+    val fieldIds = canonicalColumns.map { column =>
+      FieldPathUtils.resolveLeafField(dataset.getLanceSchema, column).getId
+    }.toList
+
+    val indexBuilder = Index
+      .builder()
+      .uuid(uuid)
+      .name(indexName)
+      .fields(fieldIds.map(java.lang.Integer.valueOf).asJava)
+      .datasetVersion(dataset.version())
+      .indexDetails(emptyIndex.indexDetails().orElse(Array.empty[Byte]))
+      .indexVersion(emptyIndex.indexVersion())
+      .indexType(indexType)
+      .fragments(java.util.Collections.emptyList())
+    emptyIndex.createdAt().ifPresent(indexBuilder.createdAt)
+    val index = indexBuilder.build()
+
+    val removedIndices = dataset.getIndexes.asScala
+      .filter(_.name() == indexName)
+      .toList.asJava
+
+    val op = AddIndexOperation.builder()
+      .withNewIndices(Collections.singletonList(index))
+      .withRemovedIndices(removedIndices)
+      .build()
+    val txn = new Transaction.Builder()
+      .readVersion(dataset.version())
+      .operation(op)
+      .build()
+    try {
+      val newDataset = new CommitBuilder(dataset)
+        .writeParams(readOptions.getStorageOptions)
+        .execute(txn)
+      newDataset.close()
+    } finally {
+      txn.close()
+    }
+
+    Seq(new GenericInternalRow(Array[Any](0L, UTF8String.fromString(indexName))))
   }
 
   // Lance core's commitExistingIndexSegments handles atomic replacement:
@@ -862,6 +967,21 @@ object IndexUtils {
   private val jsonMapper = new ObjectMapper()
 
   /**
+   * Extracts the `train` option from named arguments, defaulting to `true`.
+   *
+   * When `train=false`, index creation registers an empty index without processing any data.
+   * All existing rows will be unindexed and covered by a subsequent OPTIMIZE INDEX call.
+   */
+  def extractTrain(args: Seq[LanceNamedArgument]): Boolean =
+    args.find(_.name == "train") match {
+      case Some(LanceNamedArgument(_, b: java.lang.Boolean)) => b.booleanValue()
+      case Some(LanceNamedArgument(_, other)) =>
+        throw new IllegalArgumentException(
+          s"'train' option must be a boolean literal (true/false), got: $other")
+      case None => true
+    }
+
+  /**
    * Build an [[IndexType]] from the given index method string.
    *
    * @param method the index method name
@@ -942,12 +1062,18 @@ object IndexUtils {
     first
   }
 
+  // Options consumed at the Spark execution layer that must not be forwarded to the Lance
+  // index backend as index parameters.
+  private val SparkOnlyOptions: Set[String] =
+    Set("train", "build_mode", "rows_per_range", "num_segments")
+
   def toJson(args: Seq[LanceNamedArgument]): String = {
-    if (args.isEmpty) {
+    val indexArgs = args.filterNot(a => SparkOnlyOptions.contains(a.name))
+    if (indexArgs.isEmpty) {
       "{}"
     } else {
       val node: ObjectNode = jsonMapper.createObjectNode()
-      args.foreach { a =>
+      indexArgs.foreach { a =>
         a.value match {
           case null => node.putNull(a.name)
           case s: java.lang.String =>

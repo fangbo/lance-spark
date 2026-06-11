@@ -19,6 +19,7 @@ import org.lance.index.IndexDescription;
 import org.lance.index.IndexType;
 import org.lance.spark.utils.FieldPathUtils;
 
+import org.apache.spark.SparkException;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -671,6 +672,59 @@ public abstract class BaseAddIndexTest {
         exception.getMessage().contains("Unrecognized build_mode"),
         "Expected error message to mention unrecognized build_mode, got: "
             + exception.getMessage());
+  }
+
+  @Test
+  public void testCreateIndexFailureLeavesTableUsable() {
+    prepareDataset();
+
+    // An FTS index on a non-text column (id is int) resolves the column fine but fails inside
+    // AddIndexExec.run()'s FTS path, after the driver-side dataset is opened — the path the
+    // close-on-failure fix guards. We assert the publicly observable contract: the failed index
+    // is not committed, the table stays queryable, and a later valid CREATE INDEX succeeds. (On
+    // POSIX a leaked read handle would not surface, so this guards reusability/cleanliness, not
+    // handle-closure directly.)
+    Exception failure =
+        Assertions.assertThrows(
+            Exception.class,
+            () ->
+                spark
+                    .sql(
+                        String.format(
+                            "alter table %s create index bad_idx using fts (id)", fullTable))
+                    .collect());
+
+    // The failure must come from the distributed index-build job, which runs only after the
+    // driver-side dataset is opened. A SparkException in the cause chain indicates a job failure;
+    // earlier failures (analysis, driver-side validation) surface unwrapped and would mean this
+    // test no longer exercises the close-on-failure path it exists to guard.
+    boolean fromBuildJob = false;
+    for (Throwable t = failure; t != null && !fromBuildJob; t = t.getCause()) {
+      fromBuildJob = t instanceof SparkException;
+    }
+    Assertions.assertTrue(
+        fromBuildJob, "Expected a build-job failure after dataset open, got: " + failure);
+
+    // The table is still fully queryable after the failed CREATE INDEX. collectAsList (not
+    // count, which is answered from manifest metadata) forces a real scan of the data pages.
+    Dataset<Row> all = spark.sql(String.format("select * from %s", fullTable));
+    Assertions.assertEquals(20, all.collectAsList().size());
+
+    // Nothing was committed to the manifest: the table should have no index at all. (A check
+    // for the failed name alone would miss unnamed segment entries.)
+    org.lance.Dataset lanceDataset = org.lance.Dataset.open().uri(tableDir).build();
+    try {
+      Assertions.assertTrue(
+          lanceDataset.getIndexes().isEmpty(),
+          "Failed CREATE INDEX should not commit any index to the manifest, found: "
+              + lanceDataset.getIndexes());
+    } finally {
+      lanceDataset.close();
+    }
+
+    // The dataset is reusable: a subsequent valid CREATE INDEX still succeeds.
+    spark.sql(String.format("alter table %s create index good_idx using btree (id)", fullTable));
+    checkIndex("good_idx");
   }
 
   @Test

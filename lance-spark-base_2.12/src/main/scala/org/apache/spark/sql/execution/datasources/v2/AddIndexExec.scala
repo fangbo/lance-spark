@@ -182,18 +182,22 @@ case class AddIndexExec(
     val uuid = UUID.randomUUID()
     val dataset = Utils.openDatasetBuilder(readOptions).build()
 
-    val indexBuildResult =
-      new FragmentBasedIndexJob(
-        this.copy(columns = canonicalColumns),
-        readOptions,
-        uuid.toString,
-        fragmentIds,
-        nsImpl,
-        nsProps,
-        tableId,
-        initialStorageOpts).run()
-
+    // The finally closes the dataset on every exit path. If the index-build job or the commit
+    // below fails, partial index files written under this uuid (per-fragment partials and any
+    // merged root) stay uncommitted: unreferenced by the manifest, so invisible to readers, and
+    // eventually reclaimable by VACUUM with delete_unverified = true.
     try {
+      val indexBuildResult =
+        new FragmentBasedIndexJob(
+          this.copy(columns = canonicalColumns),
+          readOptions,
+          uuid.toString,
+          fragmentIds,
+          nsImpl,
+          nsProps,
+          tableId,
+          initialStorageOpts).run()
+
       // Merge index metadata after all fragments are indexed
       dataset.mergeIndexMetadata(uuid.toString, indexType, Optional.empty())
 

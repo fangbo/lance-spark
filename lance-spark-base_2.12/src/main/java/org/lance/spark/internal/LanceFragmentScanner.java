@@ -129,6 +129,7 @@ public class LanceFragmentScanner implements AutoCloseable {
         scanOptions.filter(inputPartition.getWhereCondition().get());
       }
       scanOptions.batchSize(readOptions.getBatchSize());
+      scanOptions.useScalarIndex(readOptions.isUseScalarIndex());
       if (inputPartition.getLimit().isPresent()) {
         scanOptions.limit(inputPartition.getLimit().get());
       }

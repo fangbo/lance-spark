@@ -51,6 +51,7 @@ public class LanceSparkReadOptions implements Serializable {
   public static final String CONFIG_INDEX_CACHE_SIZE = "index_cache_size";
   public static final String CONFIG_METADATA_CACHE_SIZE = "metadata_cache_size";
   public static final String CONFIG_BATCH_SIZE = "batch_size";
+  public static final String CONFIG_USE_SCALAR_INDEX = "use_scalar_index";
   public static final String CONFIG_TOP_N_PUSH_DOWN = "topN_push_down";
   private static final String DEPRECATED_CONFIG_NEAREST = "nearest";
 
@@ -93,6 +94,7 @@ public class LanceSparkReadOptions implements Serializable {
   private static final boolean DEFAULT_PUSH_DOWN_FILTERS = true;
   // Changed from 512 to 8192 for better OLAP scan performance (33x improvement)
   private static final int DEFAULT_BATCH_SIZE = 8192;
+  private static final boolean DEFAULT_USE_SCALAR_INDEX = false;
   private static final boolean DEFAULT_TOP_N_PUSH_DOWN = true;
   private static final boolean DEFAULT_EXECUTOR_CREDENTIAL_REFRESH = true;
 
@@ -105,6 +107,7 @@ public class LanceSparkReadOptions implements Serializable {
   private final Integer indexCacheSize;
   private final Integer metadataCacheSize;
   private final int batchSize;
+  private final boolean useScalarIndex;
   private final boolean topNPushDown;
   private final Map<String, String> storageOptions;
 
@@ -134,6 +137,7 @@ public class LanceSparkReadOptions implements Serializable {
     this.indexCacheSize = builder.indexCacheSize;
     this.metadataCacheSize = builder.metadataCacheSize;
     this.batchSize = builder.batchSize;
+    this.useScalarIndex = builder.useScalarIndex;
     this.topNPushDown = builder.topNPushDown;
     this.storageOptions = new HashMap<>(builder.storageOptions);
     this.namespace = builder.namespace;
@@ -246,6 +250,10 @@ public class LanceSparkReadOptions implements Serializable {
     return batchSize;
   }
 
+  public boolean isUseScalarIndex() {
+    return useScalarIndex;
+  }
+
   public boolean isTopNPushDown() {
     return topNPushDown;
   }
@@ -305,6 +313,7 @@ public class LanceSparkReadOptions implements Serializable {
         .indexCacheSize(this.indexCacheSize)
         .metadataCacheSize(this.metadataCacheSize)
         .batchSize(this.batchSize)
+        .useScalarIndex(this.useScalarIndex)
         .topNPushDown(this.topNPushDown)
         .storageOptions(this.storageOptions)
         .namespace(this.namespace)
@@ -348,6 +357,7 @@ public class LanceSparkReadOptions implements Serializable {
     LanceSparkReadOptions that = (LanceSparkReadOptions) o;
     return pushDownFilters == that.pushDownFilters
         && batchSize == that.batchSize
+        && useScalarIndex == that.useScalarIndex
         && topNPushDown == that.topNPushDown
         && executorCredentialRefresh == that.executorCredentialRefresh
         && Objects.equals(datasetUri, that.datasetUri)
@@ -369,6 +379,7 @@ public class LanceSparkReadOptions implements Serializable {
         indexCacheSize,
         metadataCacheSize,
         batchSize,
+        useScalarIndex,
         topNPushDown,
         storageOptions,
         tableId,
@@ -384,6 +395,7 @@ public class LanceSparkReadOptions implements Serializable {
     private Integer indexCacheSize;
     private Integer metadataCacheSize;
     private int batchSize = DEFAULT_BATCH_SIZE;
+    private boolean useScalarIndex = DEFAULT_USE_SCALAR_INDEX;
     private boolean topNPushDown = DEFAULT_TOP_N_PUSH_DOWN;
     private Map<String, String> storageOptions = new HashMap<>();
     private LanceNamespace namespace;
@@ -425,6 +437,11 @@ public class LanceSparkReadOptions implements Serializable {
 
     public Builder batchSize(int batchSize) {
       this.batchSize = batchSize;
+      return this;
+    }
+
+    public Builder useScalarIndex(boolean useScalarIndex) {
+      this.useScalarIndex = useScalarIndex;
       return this;
     }
 
@@ -519,6 +536,9 @@ public class LanceSparkReadOptions implements Serializable {
       }
       if (opts.containsKey(CONFIG_TOP_N_PUSH_DOWN)) {
         this.topNPushDown = Boolean.parseBoolean(opts.get(CONFIG_TOP_N_PUSH_DOWN));
+      }
+      if (opts.containsKey(CONFIG_USE_SCALAR_INDEX)) {
+        this.useScalarIndex = Boolean.parseBoolean(opts.get(CONFIG_USE_SCALAR_INDEX));
       }
       if (opts.containsKey(CONFIG_EXECUTOR_CREDENTIAL_REFRESH)) {
         this.executorCredentialRefresh =

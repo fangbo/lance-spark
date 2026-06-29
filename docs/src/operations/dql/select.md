@@ -237,7 +237,7 @@ These options control how data is read from Lance datasets. They can be set usin
 | Option                | Type    | Default | Description                                                                                                       |
 |-----------------------|---------|---------|-------------------------------------------------------------------------------------------------------------------|
 | `batch_size`          | Integer | `8192`  | Number of rows to read per batch during scanning. Larger values may improve throughput but increase memory usage. |
-| `use_scalar_index`    | Boolean | `true`  | Whether to use scalar indices (e.g. zonemap) for filter acceleration during scanning.                             |
+| `use_scalar_index`    | Boolean | `false` | Whether to use scalar indices (e.g. btree) for filter acceleration during scanning.                               |
 | `version`             | Integer | Latest  | Specific dataset version to read. If not specified, reads the latest version.                                     |
 | `block_size`          | Integer | -       | Block size in bytes for reading data.                                                                             |
 | `index_cache_size`    | Integer | -       | Size of the index cache in number of entries.                                                                     |

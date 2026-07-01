@@ -100,7 +100,6 @@ public abstract class BaseLanceReadMetricsIntegrationTest {
                 "spark.sql.extensions", "org.lance.spark.extensions.LanceSparkSessionExtensions")
             .config("spark.sql.catalog.lance.impl", "dir")
             .config("spark.sql.catalog.lance.root", tempDir.toString())
-            .config("spark.sql.catalog.lance.storage.use_scalar_index", "true")
             .getOrCreate();
     metricsListener = new MetricsCapturingListener();
     spark.sparkContext().addSparkListener(metricsListener);

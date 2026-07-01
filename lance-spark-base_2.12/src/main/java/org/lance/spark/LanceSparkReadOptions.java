@@ -94,7 +94,7 @@ public class LanceSparkReadOptions implements Serializable {
   private static final boolean DEFAULT_PUSH_DOWN_FILTERS = true;
   // Changed from 512 to 8192 for better OLAP scan performance (33x improvement)
   private static final int DEFAULT_BATCH_SIZE = 8192;
-  private static final boolean DEFAULT_USE_SCALAR_INDEX = false;
+  private static final boolean DEFAULT_USE_SCALAR_INDEX = true;
   private static final boolean DEFAULT_TOP_N_PUSH_DOWN = true;
   private static final boolean DEFAULT_EXECUTOR_CREDENTIAL_REFRESH = true;
 
